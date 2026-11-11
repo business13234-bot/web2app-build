@@ -382,8 +382,13 @@ final class AppUITests: XCTestCase {
         sleep(66)
         app.activate()
         passLock()
-        sleep(3)
-        let after = value(label(beginning: "font=", 10), "loaded")
+        // The reload may still be running after the unlock: wait for the new page's numbers.
+        var after = ""
+        let until = Date().addingTimeInterval(15)
+        repeat {
+            sleep(1)
+            after = value(label(beginning: "font=", 3), "loaded")
+        } while (after.isEmpty || after == before) && Date() < until
         check("reload after a long break", !before.isEmpty && !after.isEmpty && before != after, "\(before) -> \(after)")
         finish()
     }
