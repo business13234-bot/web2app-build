@@ -241,13 +241,8 @@ write(path.join(main, 'res', 'values', 'styles.xml'), `<?xml version="1.0" encod
 
 if (on('darkMode')) {
   // Dark theme when the phone is in dark mode; web pages then see prefers-color-scheme: dark.
-  if (!on('splash')) {
-    write(path.join(main, 'res', 'values-night', 'colors.xml'), `<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="splash_bg">#121212</color>
-</resources>
-`);
-  }
+  // The launch colour stays the page colour (white): a dark launch screen before a white site is
+  // exactly the flash people notice.
   write(path.join(main, 'res', 'values-night', 'styles.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
@@ -276,10 +271,21 @@ function v31Styles(parent) {
         <item name="android:colorAccent">@color/theme</item>
         <item name="android:statusBarColor">@color/theme</item>
         <item name="android:navigationBarColor">@color/theme</item>
-    </style>
+    </style>${launchThemes}
 </resources>
 `;
 }
+// Launch screens the app picks for its next start, by the colour its pages really show
+// (MainActivity.learnLaunchColor, Android 13+; not used with the splash feature).
+const launchThemes = `
+    <style name="AppTheme.LaunchLight">
+        <item name="android:windowSplashScreenBackground">#FFFFFF</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FFFFFF</item>
+    </style>
+    <style name="AppTheme.LaunchDark">
+        <item name="android:windowSplashScreenBackground">#121212</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#121212</item>
+    </style>`;
 write(path.join(main, 'res', 'values-v31', 'styles.xml'), v31Styles('android:Theme.Material.Light.NoActionBar'));
 if (on('darkMode')) write(path.join(main, 'res', 'values-night-v31', 'styles.xml'), v31Styles('android:Theme.Material.NoActionBar'));
 

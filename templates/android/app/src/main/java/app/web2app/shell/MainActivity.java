@@ -255,17 +255,72 @@ public class MainActivity extends Activity {
         maybeAskPermissions();
     }
 
+    /** The first page can be shown: lets the launch screen go (see holdUntilFirstPaint). */
+    private void pageReady() {
+        if (firstPaint) return;
+        firstPaint = true;
+        View v = findViewById(android.R.id.content);
+        if (v != null) v.post(v::invalidate);
+        if (web != null) web.postDelayed(this::learnLaunchColor, 1500);
+    }
+
+    /** The colour of the launch screen: the splash colour, or the colour the site showed last time. */
+    private int launchColor() {
+        if (f("splash") == null && prefs != null && prefs.getBoolean("launchDark", false)) return 0xFF121212;
+        return Config.color(cfg.optString("splashColor"), Color.WHITE);
+    }
+
     /**
-     * Keeps the launch screen until the first page has drawn (or 3 seconds, or the offline screen),
-     * so the app opens straight onto the page instead of a blank white screen.
+     * Looks at the page as drawn (the site's own colours, or Android's darkening of it) and keeps
+     * whether it is dark, so the next launch screen has the same colour as the page: opening the
+     * app then shows one colour, never light then dark or dark then light.
+     */
+    private void learnLaunchColor() {
+        if (f("splash") != null || web == null || web.getWidth() == 0 || web.getHeight() == 0 || isFinishing()) return;
+        boolean dark;
+        try {
+            Bitmap bmp = Bitmap.createBitmap(24, 48, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            c.drawColor(Color.WHITE);
+            c.scale(24f / web.getWidth(), 48f / web.getHeight());
+            c.translate(-web.getScrollX(), -web.getScrollY());
+            web.draw(c);
+            double sum = 0;
+            int n = 0;
+            for (int y = 0; y < 48; y++) {
+                for (int x = 0; x < 24; x++) {
+                    int p = bmp.getPixel(x, y);
+                    sum += (0.2126 * Color.red(p) + 0.7152 * Color.green(p) + 0.0722 * Color.blue(p)) / 255.0;
+                    n++;
+                }
+            }
+            bmp.recycle();
+            dark = sum / n < 0.4;
+        } catch (Throwable t) {
+            return;
+        }
+        if (prefs.getBoolean("launchDark", false) != dark) prefs.edit().putBoolean("launchDark", dark).apply();
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                getSplashScreen().setSplashScreenTheme(dark ? R.style.AppTheme_LaunchDark : R.style.AppTheme_LaunchLight);
+            } catch (Throwable ignored) {
+                // an older launcher without this: the plain launch colour stays
+            }
+        }
+    }
+
+    /**
+     * Keeps the launch screen until the first page has loaded (or 4 seconds, or the offline screen),
+     * so the app opens straight onto the site: no blank page, no half-built page with its own loader.
      */
     private void holdUntilFirstPaint() {
         final View v = findViewById(android.R.id.content);
         final long t0 = SystemClock.uptimeMillis();
+        v.postDelayed(v::invalidate, 4050); // the check below runs again at the time limit
         v.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
             @Override
             public boolean onPreDraw() {
-                if (firstPaint || (offline != null && offline.getVisibility() == View.VISIBLE) || SystemClock.uptimeMillis() - t0 > 3000) {
+                if (firstPaint || (offline != null && offline.getVisibility() == View.VISIBLE) || SystemClock.uptimeMillis() - t0 > 4000) {
                     v.getViewTreeObserver().removeOnPreDrawListener(this);
                     return true;
                 }
@@ -455,7 +510,8 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         content = new FrameLayout(this);
-        content.setBackgroundColor(pageBg);
+        // Behind the page before it draws: the launch colour, so opening the app shows one colour only.
+        content.setBackgroundColor(launchColor());
         column.addView(content, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         adBottom = new FrameLayout(this);
@@ -467,7 +523,7 @@ public class MainActivity extends Activity {
         if (nav != null) column.addView(buildBottomNav(nav));
 
         web = new WebView(this);
-        web.setBackgroundColor(pageBg);
+        web.setBackgroundColor(launchColor());
         // Password managers (Google, Samsung Pass, 1Password ...) can fill and save logins in the page.
         if (Build.VERSION.SDK_INT >= 26) web.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
         web.addJavascriptInterface(new LoginBridge(), "__w2aLogin");
@@ -3108,7 +3164,8 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageCommitVisible(WebView view, String url) {
-            firstPaint = true;
+            // Drawn, but the site's scripts may still be building it: give them a moment.
+            view.postDelayed(MainActivity.this::pageReady, 1200);
             inject();
             JSONObject fade = f("pageFade");
             if (fade != null && firstPageDone) {
@@ -3127,7 +3184,7 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            firstPaint = true;
+            pageReady();
             currentUrl = url == null ? "" : url;
             if (httpErrorUrl != null && httpErrorUrl.equals(url)) showErrorPage(url);
             else hideErrorPage();
@@ -3189,7 +3246,7 @@ public class MainActivity extends Activity {
     private class Chrome extends WebChromeClient {
         @Override
         public void onProgressChanged(WebView view, int newProgress) {
-            if (newProgress >= 80) firstPaint = true;
+            if (newProgress >= 100) pageReady();
             progress.setProgress(newProgress, true);
             if (newProgress < 100) {
                 if (progress.getParent() != null) progress.setVisibility(View.VISIBLE);
