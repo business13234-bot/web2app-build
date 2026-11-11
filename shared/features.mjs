@@ -463,7 +463,7 @@ export const FEATURES = [
     ],
   },
   {
-    id: 'longPress', icon: 'touch_app', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.2',
+    id: 'longPress', icon: 'pan_tool', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.2',
     title: 'Long-press menu',
     desc: 'Long-press a link to open, copy or share it, or an image to save or share it.',
     fields: [
@@ -563,7 +563,7 @@ export const FEATURES = [
     ],
   },
   {
-    id: 'speech', icon: 'campaign', group: 'Code', platforms: ['android', 'ios'], added: '1.4',
+    id: 'speech', icon: 'record_voice_over', group: 'Code', platforms: ['android', 'ios'], added: '1.4',
     title: 'Read aloud',
     desc: 'Your page can speak text with the phone voice: Web2AppSpeech.speak("Hello", "en-US") and Web2AppSpeech.stop().',
     fields: [

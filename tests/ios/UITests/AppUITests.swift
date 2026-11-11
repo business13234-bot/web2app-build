@@ -312,6 +312,7 @@ final class AppUITests: XCTestCase {
     }
 
     private func tapWebLink(_ text: String) -> Bool {
+        _ = allowAlerts(1)
         let l = app.webViews.links[text].firstMatch
         guard l.waitForExistence(timeout: 6) else { return false }
         l.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
@@ -326,6 +327,8 @@ final class AppUITests: XCTestCase {
         shot("d-lock")
         check("themed lock screen", lockShown && app.staticTexts["Locked for your privacy"].exists)
         check("lock opens", passLock())
+        // Permission questions (camera etc.) come after the lock and would swallow the taps below.
+        _ = allowAlerts(6)
         check("feature page loads", web("Feature page", 15))
         let fs = label(beginning: "font=", 10)
         check("app font", value(fs, "font") == "Poppins", fs)
@@ -334,6 +337,7 @@ final class AppUITests: XCTestCase {
         shot("d-feature-page")
 
         // Read aloud: the page shows speaking=true while the voice talks.
+        _ = allowAlerts(1)
         let speak = app.webViews.buttons["Speak"].firstMatch
         if speak.waitForExistence(timeout: 5) { speak.tap() }
         let talking = app.webViews.staticTexts["speaking=true"].waitForExistence(timeout: 8)
