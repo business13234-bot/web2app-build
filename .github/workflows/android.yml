@@ -1,0 +1,99 @@
+name: android
+run-name: android-${{ inputs.id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: Build id
+        required: true
+        type: string
+      payload_url:
+        description: Where to fetch the build request
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BUILD_ID: ${{ inputs.id }}
+      PAYLOAD_URL: ${{ inputs.payload_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch build request
+        env:
+          FETCH_SECRET: ${{ secrets.W2A_FETCH_SECRET }}
+        run: |
+          [[ "$BUILD_ID" =~ ^[a-f0-9]{24}$ ]] || { echo "Bad build id"; exit 1; }
+          [[ "$PAYLOAD_URL" == https://* ]] || { echo "Bad payload url"; exit 1; }
+          echo "::add-mask::$PAYLOAD_URL"
+          curl -fsS --retry 3 -H "Authorization: Bearer $FETCH_SECRET" "$PAYLOAD_URL" -o "$RUNNER_TEMP/payload.json"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Prepare project
+        run: node scripts/gen-android.mjs "$RUNNER_TEMP/payload.json" "$RUNNER_TEMP/android"
+
+      - name: Create signing key
+        if: env.W2A_KEYSTORE_GENERATED == '1'
+        run: |
+          keytool -genkeypair -keystore "$W2A_KEYSTORE_FILE" -storetype PKCS12 \
+            -storepass:env W2A_KEYSTORE_PASS -keypass:env W2A_KEY_PASS \
+            -alias "$W2A_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=$W2A_PACKAGE_ID, O=Web2App"
+
+      - name: Build APK and AAB
+        working-directory: ${{ runner.temp }}/android
+        run: gradle --no-daemon --stacktrace assembleRelease bundleRelease
+
+      - name: Collect files
+        run: |
+          OUT="$RUNNER_TEMP/out"
+          mkdir -p "$OUT"
+          cp "$RUNNER_TEMP/android/app/build/outputs/apk/release/app-release.apk" "$OUT/app-$W2A_VERSION.apk"
+          cp "$RUNNER_TEMP/android/app/build/outputs/bundle/release/app-release.aab" "$OUT/app-$W2A_VERSION.aab"
+          if [ "$W2A_KEYSTORE_GENERATED" = "1" ]; then
+            cp "$W2A_KEYSTORE_FILE" "$OUT/release.keystore"
+            {
+              echo "KEEP THIS FILE AND release.keystore SAFE."
+              echo "Every future update of this app must be signed with the same keystore."
+              echo "If you lose it you cannot update the app on Google Play."
+              echo
+              echo "Package id     : $W2A_PACKAGE_ID"
+              echo "Keystore file  : release.keystore"
+              echo "Key alias      : $W2A_KEY_ALIAS"
+              echo "Store password : $W2A_KEYSTORE_PASS"
+              echo "Key password   : $W2A_KEY_PASS"
+            } > "$OUT/keystore-info.txt"
+          fi
+          ls -la "$OUT"
+
+      # This repository is public: only encrypted files leave the runner.
+      - name: Encrypt files
+        run: node scripts/encrypt-out.mjs "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ inputs.id }}
+          path: ${{ runner.temp }}/out
+          retention-days: 1
+          # Stored, not compressed: APK/AAB/IPA are already compressed, and the Worker can hand out single files quickly.
+          compression-level: 0
+          if-no-files-found: error

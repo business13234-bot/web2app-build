@@ -1,0 +1,161 @@
+name: ios
+run-name: ios-${{ inputs.id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: Build id
+        required: true
+        type: string
+      payload_url:
+        description: Where to fetch the build request
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      BUILD_ID: ${{ inputs.id }}
+      PAYLOAD_URL: ${{ inputs.payload_url }}
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch build request
+        env:
+          FETCH_SECRET: ${{ secrets.W2A_FETCH_SECRET }}
+        run: |
+          [[ "$BUILD_ID" =~ ^[a-f0-9]{24}$ ]] || { echo "Bad build id"; exit 1; }
+          [[ "$PAYLOAD_URL" == https://* ]] || { echo "Bad payload url"; exit 1; }
+          echo "::add-mask::$PAYLOAD_URL"
+          curl -fsS --retry 3 -H "Authorization: Bearer $FETCH_SECRET" "$PAYLOAD_URL" -o "$RUNNER_TEMP/payload.json"
+
+      - name: Prepare project
+        run: |
+          node scripts/gen-ios.mjs "$RUNNER_TEMP/payload.json" "$RUNNER_TEMP/ios"
+          cd "$RUNNER_TEMP/ios"
+          # App Store icons must be opaque PNG files.
+          sips -s format png icon-source.jpg --out Sources/Assets.xcassets/AppIcon.appiconset/icon.png >/dev/null
+          rm icon-source.jpg
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate --spec project.json
+          xcodebuild -version
+
+      - name: Build unsigned IPA
+        if: env.W2A_IOS_SIGNED != '1'
+        working-directory: ${{ runner.temp }}/ios
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$PWD/App.xcarchive" archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tail -n 60
+          test -d App.xcarchive/Products/Applications/App.app
+          mkdir -p Payload "$RUNNER_TEMP/out"
+          cp -R App.xcarchive/Products/Applications/App.app Payload/
+          zip -qry "$RUNNER_TEMP/out/app-$W2A_VERSION-unsigned.ipa" Payload
+          {
+            echo "This IPA is NOT signed."
+            echo "It cannot be uploaded to the App Store or installed on a normal iPhone."
+            echo "Build again with your Apple distribution certificate (.p12) and"
+            echo "provisioning profile to get an App Store ready IPA."
+          } > "$RUNNER_TEMP/out/README-unsigned.txt"
+
+      - name: Build signed IPA
+        if: env.W2A_IOS_SIGNED == '1'
+        working-directory: ${{ runner.temp }}/ios
+        run: |
+          set -eo pipefail
+          PB=/usr/libexec/PlistBuddy
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          security cms -D -i signing/profile.mobileprovision > "$PROFILE_PLIST"
+          UUID=$($PB -c 'Print :UUID' "$PROFILE_PLIST")
+          TEAM=$($PB -c 'Print :TeamIdentifier:0' "$PROFILE_PLIST")
+          APPID=$($PB -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST")
+          PROFILE_BUNDLE="${APPID#*.}"
+          [[ "$UUID" =~ ^[A-Fa-f0-9-]{36}$ ]] || { echo "::error::Provisioning profile is not valid"; exit 1; }
+          [[ "$TEAM" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::Provisioning profile has no team id"; exit 1; }
+          if [[ "$PROFILE_BUNDLE" != "$W2A_BUNDLE_ID" && "$PROFILE_BUNDLE" != "*" ]]; then
+            echo "::error::Provisioning profile is for '$PROFILE_BUNDLE' but the app id is '$W2A_BUNDLE_ID'"
+            exit 1
+          fi
+
+          # Decide the export type from the profile.
+          METHOD=app-store-connect
+          if $PB -c 'Print :ProvisionedDevices' "$PROFILE_PLIST" >/dev/null 2>&1; then METHOD=release-testing; fi
+          if [[ "$($PB -c 'Print :Entitlements:get-task-allow' "$PROFILE_PLIST" 2>/dev/null)" == "true" ]]; then METHOD=debugging; fi
+
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KPASS=$(openssl rand -hex 16)
+          security create-keychain -p "$KPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPASS" "$KEYCHAIN"
+          security import signing/cert.p12 -P "$W2A_P12_PASS" -A -t cert -f pkcs12 -k "$KEYCHAIN" \
+            || { echo "::error::Could not open the .p12 certificate (wrong password?)"; exit 1; }
+          security set-key-partition-list -S apple-tool:,apple: -k "$KPASS" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(.*\)".*/\1/p' | head -n 1)
+          [[ -n "$IDENTITY" ]] || { echo "::error::No signing identity found in the .p12 file"; exit 1; }
+
+          for DIR in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$DIR"
+            cp signing/profile.mobileprovision "$DIR/$UUID.mobileprovision"
+          done
+          rm -rf signing
+
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$PWD/App.xcarchive" archive \
+            CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$TEAM" \
+            PROVISIONING_PROFILE_SPECIFIER="$UUID" CODE_SIGN_IDENTITY="$IDENTITY" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" | tail -n 60
+
+          cat > exportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>$METHOD</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$TEAM</string>
+            <key>destination</key><string>export</string>
+            <key>provisioningProfiles</key>
+            <dict><key>$W2A_BUNDLE_ID</key><string>$UUID</string></dict>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive -archivePath "$PWD/App.xcarchive" \
+            -exportPath "$PWD/export" -exportOptionsPlist exportOptions.plist | tail -n 40
+          mkdir -p "$RUNNER_TEMP/out"
+          IPA=$(ls export/*.ipa | head -n 1)
+          cp "$IPA" "$RUNNER_TEMP/out/app-$W2A_VERSION.ipa"
+          echo "Export type: $METHOD" > "$RUNNER_TEMP/out/README-ios.txt"
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+          rm -rf "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          rm -f "$RUNNER_TEMP/payload.json"
+
+      # This repository is public: only encrypted files leave the runner.
+      - name: Encrypt files
+        run: node scripts/encrypt-out.mjs "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-${{ inputs.id }}
+          path: ${{ runner.temp }}/out
+          retention-days: 1
+          # Stored, not compressed: APK/AAB/IPA are already compressed, and the Worker can hand out single files quickly.
+          compression-level: 0
+          if-no-files-found: error

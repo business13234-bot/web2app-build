@@ -1,9 +1,0 @@
-name: probe
-on: workflow_dispatch
-jobs:
-  linux:
-    runs-on: ubuntu-latest
-    steps: [{ run: echo ok }]
-  mac:
-    runs-on: macos-26
-    steps: [{ run: echo ok }]
