@@ -845,6 +845,15 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     // MARK: - Floating button
 
+    /// Height of the page's contact bar (callBar) at the bottom: floating buttons sit above it.
+    var callBarLift: CGFloat {
+        guard let c = cfg.feature("callBar") else { return 0 }
+        let digits: (String) -> String = { (s: String) in s.filter { "0123456789+".contains($0) } }
+        let any = !digits(c.str("phone", "")).isEmpty || !digits(c.str("whatsapp", "")).isEmpty
+            || !c.str("address", "").trimmingCharacters(in: .whitespaces).isEmpty
+        return any ? 52 : 0
+    }
+
     private func buildFab() {
         guard let fab = cfg.feature("fab") else { return }
         let color = fab.color("color") ?? theme
@@ -866,7 +875,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             b.widthAnchor.constraint(equalToConstant: 56),
             b.heightAnchor.constraint(equalToConstant: 56),
             b.bottomAnchor.constraint(equalTo: navBar == nil ? view.safeAreaLayoutGuide.bottomAnchor : webView.bottomAnchor,
-                                      constant: -18),
+                                      constant: -18 - callBarLift),
             left ? b.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 18)
                  : b.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -18),
         ])

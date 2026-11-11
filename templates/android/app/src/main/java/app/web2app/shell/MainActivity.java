@@ -63,6 +63,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Parcelable;
 import android.os.SystemClock;
+import android.view.ViewTreeObserver;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.print.PrintAttributes;
@@ -170,6 +171,7 @@ public class MainActivity extends Activity {
     private String failedUrl;
     private volatile String currentUrl = "";
     private boolean firstPageDone;
+    private volatile boolean firstPaint; // the first page has something to show
     private long splashShownAt;
     private boolean splashPageReady;
     private boolean splashVideoPlaying;
@@ -246,10 +248,32 @@ public class MainActivity extends Activity {
         if (savedInstanceState == null) {
             showSplash();
             if (f("appLock") != null) lock();
+            // Without a splash screen, the page appears complete instead of after a white screen.
+            if (splash == null && f("appLock") == null) holdUntilFirstPaint();
         }
         startFeatures();
         maybeAskPermissions();
     }
+
+    /**
+     * Keeps the launch screen until the first page has drawn (or 3 seconds, or the offline screen),
+     * so the app opens straight onto the page instead of a blank white screen.
+     */
+    private void holdUntilFirstPaint() {
+        final View v = findViewById(android.R.id.content);
+        final long t0 = SystemClock.uptimeMillis();
+        v.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                if (firstPaint || (offline != null && offline.getVisibility() == View.VISIBLE) || SystemClock.uptimeMillis() - t0 > 3000) {
+                    v.getViewTreeObserver().removeOnPreDrawListener(this);
+                    return true;
+                }
+                return false;
+            }
+        });
+    }
+
 
     private JSONObject f(String id) {
         return Config.feature(cfg, id);
@@ -737,6 +761,16 @@ public class MainActivity extends Activity {
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 
+    /** Height of the page's contact bar (callBar) at the bottom, in dp: floating buttons sit above it. */
+    private int callBarLift() {
+        JSONObject c = f("callBar");
+        if (c == null) return 0;
+        boolean any = !c.optString("phone").replaceAll("[^0-9+]", "").isEmpty()
+                || !c.optString("whatsapp").replaceAll("[^0-9+]", "").isEmpty()
+                || !c.optString("address").trim().isEmpty();
+        return any ? 52 : 0;
+    }
+
     private void buildFab(JSONObject o) {
         int bg = Config.color(o.optString("color"), theme);
         FrameLayout fab = new FrameLayout(this);
@@ -752,7 +786,7 @@ public class MainActivity extends Activity {
         boolean left = "left".equals(o.optString("position", "right"));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(58), dp(58),
                 Gravity.BOTTOM | (left ? Gravity.START : Gravity.END));
-        lp.setMargins(dp(18), dp(18), dp(18), dp(18));
+        lp.setMargins(dp(18), dp(18), dp(18), dp(18 + callBarLift()));
         content.addView(fab, lp);
         fab.setScaleX(0f);
         fab.setScaleY(0f);
@@ -1754,7 +1788,7 @@ public class MainActivity extends Activity {
         boolean fabLeft = fab != null && "left".equals(fab.optString("position", "right"));
         boolean underFab = fab != null && !"center".equals(pos) && fabLeft == "left".equals(pos);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(46), dp(46), Gravity.BOTTOM | side);
-        lp.setMargins(dp(24), dp(24), dp(24), dp(underFab ? 92 : 24));
+        lp.setMargins(dp(24), dp(24), dp(24), dp((underFab ? 92 : 24) + callBarLift()));
         content.addView(b, lp);
         b.setVisibility(View.GONE);
         b.setOnClickListener(v -> {
@@ -3074,6 +3108,7 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageCommitVisible(WebView view, String url) {
+            firstPaint = true;
             inject();
             JSONObject fade = f("pageFade");
             if (fade != null && firstPageDone) {
@@ -3092,6 +3127,7 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageFinished(WebView view, String url) {
+            firstPaint = true;
             currentUrl = url == null ? "" : url;
             if (httpErrorUrl != null && httpErrorUrl.equals(url)) showErrorPage(url);
             else hideErrorPage();
@@ -3153,6 +3189,7 @@ public class MainActivity extends Activity {
     private class Chrome extends WebChromeClient {
         @Override
         public void onProgressChanged(WebView view, int newProgress) {
+            if (newProgress >= 80) firstPaint = true;
             progress.setProgress(newProgress, true);
             if (newProgress < 100) {
                 if (progress.getParent() != null) progress.setVisibility(View.VISIBLE);

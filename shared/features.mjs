@@ -18,7 +18,7 @@ export const NAV_ICONS = ['home', 'search', 'shopping_cart', 'person', 'favorite
 const ICON_OPTIONS = NAV_ICONS.map((v) => [v, v.replace(/_/g, ' ')]);
 const iconField = (def) => ({ key: 'icon', type: 'select', label: 'Icon', default: def, icons: true, options: ICON_OPTIONS });
 
-export const FEATURE_GROUPS = ['Engage', 'Look', 'Code', 'Privacy', 'Behaviour'];
+export const FEATURE_GROUPS = ['Engage', 'Business', 'Look', 'Accessibility', 'Media', 'Code', 'Privacy', 'Behaviour'];
 
 export const FEATURES = [
   // ------------------------------------------------------------ Engage
@@ -184,7 +184,7 @@ export const FEATURES = [
     fields: [{ key: 'darkenPages', type: 'bool', label: 'Darken pages without a dark theme (Android 13+)', default: true }],
   },
   {
-    id: 'textSize', icon: 'format_size', group: 'Look', platforms: ['android', 'ios'],
+    id: 'textSize', icon: 'format_size', group: 'Accessibility', platforms: ['android', 'ios'],
     title: 'Fixed text size',
     desc: 'Keeps page text at your size, whatever the phone\'s font setting.',
     fields: [{ key: 'percent', type: 'int', label: 'Text size (%)', default: 100, min: 50, max: 200 }],
@@ -481,7 +481,7 @@ export const FEATURES = [
     ],
   },
   {
-    id: 'backgroundAudio', icon: 'music_note', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.2',
+    id: 'backgroundAudio', icon: 'music_note', group: 'Media', platforms: ['android', 'ios'], added: '1.2',
     title: 'Background audio',
     desc: 'Music, radio and podcasts keep playing when the app is closed or the screen is off.',
     fields: [],
@@ -533,7 +533,7 @@ export const FEATURES = [
     ],
   },
   {
-    id: 'videoRotate', icon: 'screen_rotation_alt', group: 'Behaviour', platforms: ['android'], added: '1.4',
+    id: 'videoRotate', icon: 'screen_rotation_alt', group: 'Media', platforms: ['android'], added: '1.4',
     title: 'Landscape video',
     desc: 'Full-screen videos turn sideways automatically, and the app turns back when they close.',
     fields: [],
@@ -568,6 +568,176 @@ export const FEATURES = [
     desc: 'Your page can speak text with the phone voice: Web2AppSpeech.speak("Hello", "en-US") and Web2AppSpeech.stop().',
     fields: [
       { key: 'rate', type: 'int', label: 'Speed (%)', default: 100, min: 50, max: 200 },
+    ],
+  },
+  // ------------------------------------------------------------ 1.6
+  {
+    id: 'hideElements', icon: 'hide', group: 'Look', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Hide website parts',
+    desc: 'Hides parts of your website inside the app, such as its own header, footer or "Get our app" banner.',
+    fields: [
+      { key: 'selectors', type: 'textarea', label: 'Parts to hide (CSS selectors, one per line)', default: '', max: 1000, required: true,
+        pattern: '^[^{}<>]*$', help: 'Examples: header, .site-footer, #app-banner. Ask your web designer if you are not sure.' },
+    ],
+  },
+  {
+    id: 'nativeFeel', icon: 'phone_android', group: 'Look', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Native touch feel',
+    desc: 'No grey flash when tapping, no long-press menu on links and pictures, and taps react without delay.',
+    fields: [],
+  },
+  {
+    id: 'hideScrollbars', icon: 'drag_handle', group: 'Look', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Hide scrollbars',
+    desc: 'Pages and boxes still scroll, but without scrollbars, for a cleaner app look.',
+    fields: [],
+  },
+  {
+    id: 'smoothScroll', icon: 'swipe_up', group: 'Look', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Smooth scrolling',
+    desc: 'Links to a place on the same page glide there instead of jumping.',
+    fields: [],
+  },
+  {
+    id: 'reduceMotion', icon: 'motion_photos_off', group: 'Accessibility', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Calm motion',
+    desc: 'Turns off moving effects and animations on the page, which helps people who get dizzy from motion.',
+    fields: [
+      { key: 'onlyIfAsked', type: 'bool', label: 'Only when the phone\'s "Remove animations" setting is on', default: true },
+    ],
+  },
+  {
+    id: 'highlightLinks', icon: 'ink_selection', group: 'Accessibility', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Clear links',
+    desc: 'Underlines every link and draws a clear outline on the item in focus, so everything tappable is easy to see.',
+    fields: [],
+  },
+  {
+    id: 'grayscale', icon: 'format_color_reset', group: 'Accessibility', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Grey mode',
+    desc: 'Shows the app in shades of grey, for a calm look or a day of mourning.',
+    fields: [
+      { key: 'amount', type: 'int', label: 'Strength (%)', default: 100, min: 10, max: 100 },
+    ],
+  },
+  {
+    id: 'readableFont', icon: 'auto_stories', group: 'Accessibility', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Easy reading',
+    desc: 'Shows text in Lexend, a font made to be easy to read, with more space between lines.',
+    fields: [
+      { key: 'spacing', type: 'select', label: 'Line spacing', default: '1.6', options: [['1.4', 'A little more'], ['1.6', 'More'], ['1.8', 'Much more']] },
+    ],
+  },
+  {
+    id: 'callBar', icon: 'storefront', group: 'Business', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Contact bar',
+    desc: 'A bar at the bottom of every page with Call, WhatsApp and Directions buttons for your customers.',
+    fields: [
+      { key: 'phone', type: 'text', label: 'Phone number', max: 30, pattern: '^[+0-9 ()-]*$', help: 'With country code, like +1 555 123 4567. Leave empty to hide Call.' },
+      { key: 'whatsapp', type: 'text', label: 'WhatsApp number', max: 30, pattern: '^[+0-9 ()-]*$', help: 'Leave empty to hide WhatsApp.' },
+      { key: 'address', type: 'text', label: 'Address for directions', max: 160, help: 'Opens the map app. Leave empty to hide Directions.' },
+      { key: 'color', type: 'color', label: 'Colour', default: '' },
+    ],
+  },
+  {
+    id: 'smartLinks', icon: 'call', group: 'Business', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Tap to call or email',
+    desc: 'Phone numbers and email addresses written on your pages become links: one tap calls or writes an email.',
+    fields: [
+      { key: 'phones', type: 'bool', label: 'Phone numbers', default: true },
+      { key: 'emails', type: 'bool', label: 'Email addresses', default: true },
+    ],
+  },
+  {
+    id: 'openingHours', icon: 'schedule', group: 'Business', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Opening hours',
+    desc: 'Outside your opening hours a slim bar says you are closed and when you open again.',
+    fields: [
+      { key: 'days', type: 'select', label: 'Open on', default: 'mon-sat',
+        options: [['mon-fri', 'Monday to Friday'], ['mon-sat', 'Monday to Saturday'], ['sun-thu', 'Sunday to Thursday'], ['sat-thu', 'Saturday to Thursday'], ['all', 'Every day']] },
+      { key: 'open', type: 'time', label: 'Opens at', default: '09:00' },
+      { key: 'close', type: 'time', label: 'Closes at', default: '18:00' },
+      { key: 'text', type: 'text', label: 'Closed message', default: 'We are closed now. We open again', max: 60 },
+      { key: 'color', type: 'color', label: 'Bar colour', default: '#334155' },
+    ],
+  },
+  {
+    id: 'promoBanner', icon: 'sell', group: 'Business', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Offer banner',
+    desc: 'A banner with your offer and a button, until the date you choose. People can close it.',
+    fields: [
+      { key: 'text', type: 'text', label: 'Offer text', default: '20% off this week', max: 80, required: true },
+      { key: 'button', type: 'text', label: 'Button', default: 'Shop now', max: 20 },
+      { key: 'link', type: 'url', label: 'Button link' },
+      { key: 'until', type: 'text', label: 'Show until (YYYY-MM-DD, optional)', max: 10, pattern: '^(\\d{4}-\\d{2}-\\d{2})?$' },
+      { key: 'position', type: 'select', label: 'Position', default: 'bottom', options: [['bottom', 'Bottom'], ['top', 'Top']] },
+      { key: 'color', type: 'color', label: 'Colour', default: '' },
+    ],
+  },
+  {
+    id: 'countdown', icon: 'hourglass_top', group: 'Business', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Countdown bar',
+    desc: 'A live countdown at the top of the app to a sale, launch or event. It hides itself when the time is up.',
+    fields: [
+      { key: 'title', type: 'text', label: 'Text', default: 'Sale ends in', max: 40, required: true },
+      { key: 'end', type: 'text', label: 'Ends at (YYYY-MM-DD HH:MM, phone time)', max: 16, required: true,
+        pattern: '^\\d{4}-\\d{2}-\\d{2} ([01]\\d|2[0-3]):[0-5]\\d$', help: 'Like 2026-12-31 23:59' },
+      { key: 'link', type: 'url', label: 'Link when tapped (optional)' },
+      { key: 'color', type: 'color', label: 'Colour', default: '#DC2626' },
+    ],
+  },
+  {
+    id: 'pauseHidden', icon: 'pause_circle', group: 'Media', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Pause when away',
+    desc: 'Videos stop when the user leaves the app or the screen turns off, and do not keep playing in the background.',
+    fields: [
+      { key: 'audio', type: 'bool', label: 'Also stop sound and music', default: false,
+        help: 'Leave this off when your site plays music or radio that should keep playing.' },
+    ],
+  },
+  {
+    id: 'quietAutoplay', icon: 'volume_off', group: 'Media', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Quiet autoplay',
+    desc: 'Videos that start by themselves play without sound until the user taps them.',
+    fields: [],
+  },
+  {
+    id: 'copyProtect', icon: 'content_copy', group: 'Privacy', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Copy protection',
+    desc: 'Stops copying of your text and saving of your pictures, for courses, articles and paid content.',
+    fields: [
+      { key: 'allowForms', type: 'bool', label: 'People can still copy and paste in form fields', default: true },
+    ],
+  },
+  {
+    id: 'popupBlock', icon: 'block', group: 'Privacy', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Pop-up blocker',
+    desc: 'Pages cannot open new windows on their own; windows opened by a tap still work.',
+    fields: [],
+  },
+  {
+    id: 'keyboardFix', icon: 'keyboard', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Fields above the keyboard',
+    desc: 'When someone taps a field, the page moves so the field stays visible above the keyboard.',
+    fields: [],
+  },
+  {
+    id: 'formSaver', icon: 'save_as', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Form draft saver',
+    desc: 'What people type in your forms is kept if the page reloads or the app closes, until they send it. Passwords and card details are never kept.',
+    fields: [
+      { key: 'hours', type: 'int', label: 'Keep drafts for (hours)', default: 24, min: 1, max: 168 },
+    ],
+  },
+  {
+    id: 'feedback', icon: 'forum', group: 'Engage', platforms: ['android', 'ios'], added: '1.6',
+    title: 'Feedback button',
+    desc: 'A small tab on the side of the screen; it opens an email to you with the page and phone details filled in.',
+    fields: [
+      { key: 'email', type: 'text', label: 'Your email', max: 120, required: true, pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$' },
+      { key: 'label', type: 'text', label: 'Tab text', default: 'Feedback', max: 16 },
+      { key: 'position', type: 'select', label: 'Side', default: 'right', options: [['right', 'Right'], ['left', 'Left']] },
+      { key: 'color', type: 'color', label: 'Colour', default: '' },
     ],
   },
 ];

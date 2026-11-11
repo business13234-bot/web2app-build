@@ -674,7 +674,7 @@ extension WebViewController {
             b.widthAnchor.constraint(equalToConstant: 44),
             b.heightAnchor.constraint(equalToConstant: 44),
             b.bottomAnchor.constraint(equalTo: navBar == nil ? guide.bottomAnchor : webView.bottomAnchor,
-                                      constant: sameSide ? -(18 + 56 + 14) : -24),
+                                      constant: (sameSide ? -(18 + 56 + 14) : -24) - callBarLift),
             left ? b.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 24)
                  : b.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -24),
         ])
