@@ -1451,6 +1451,12 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         noteHttpStatus(navigationResponse)
+        if !navigationResponse.canShowMIMEType, let failed = httpErrorURL {
+            // A server error without a web page body is not a download: show the error page.
+            decisionHandler(.cancel)
+            errorPageNavigationFinished(failed)
+            return
+        }
         if !navigationResponse.canShowMIMEType, cfg.bool("downloads", true),
            let url = navigationResponse.response.url {
             // Files the web view cannot display are handed to Safari to download.
