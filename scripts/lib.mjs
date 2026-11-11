@@ -24,8 +24,7 @@ function hideCustomerData(payload) {
   if (String(c.appName || '').trim().length >= 4) values.add(String(c.appName).trim());
   try { values.add(new URL(c.url).host); } catch { /* ignore */ }
   for (const v of values) {
-    if (v && !/[
-]/.test(v)) console.log(`::add-mask::${v}`);
+    if (v && !/[\r\n]/.test(v)) console.log(`::add-mask::${v}`);
   }
   if (payload.fileKey) setEnv('W2A_FILE_KEY', payload.fileKey, { secret: true });
 }
