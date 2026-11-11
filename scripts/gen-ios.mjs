@@ -3,7 +3,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PERMISSIONS } from '../shared/catalog.mjs';
-import { readPayload, copyDir, write, writeImage, writeBinary, setEnv } from './lib.mjs';
+import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, splashMedia } from './lib.mjs';
 
 const [payloadFile, outDir] = process.argv.slice(2);
 if (!payloadFile || !outDir) {
@@ -45,6 +45,10 @@ write(path.join(assets, 'SplashLogo.imageset', 'Contents.json'), JSON.stringify(
   images: [{ filename: 'logo.jpg', idiom: 'universal' }],
   info: { author: 'xcode', version: 1 },
 }, null, 2));
+
+// Splash image or video, copied into the app bundle (everything in Sources is bundled).
+const media = splashMedia(payload);
+if (media) write(path.join(out, 'Sources', media.kind === 'image' ? `splash_bg.${media.ext}` : 'splash.mp4'), media.buf);
 
 const hex = (i) => `0x${cfg.splashColor.slice(i, i + 2).toUpperCase()}`;
 write(path.join(assets, 'LaunchBg.colorset', 'Contents.json'), JSON.stringify({

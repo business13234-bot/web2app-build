@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PERMISSIONS } from '../shared/catalog.mjs';
-import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, xml } from './lib.mjs';
+import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, xml, splashMedia } from './lib.mjs';
 
 const [payloadFile, outDir] = process.argv.slice(2);
 if (!payloadFile || !outDir) {
@@ -208,6 +208,10 @@ const icons = payload.icons || {};
 writeImage(path.join(main, 'res', 'mipmap-xxxhdpi', 'ic_launcher.png'), icons.android, 'png');
 writeImage(path.join(main, 'res', 'mipmap-xxxhdpi', 'ic_launcher_legacy.png'), icons.android, 'png');
 writeImage(path.join(main, 'res', 'drawable-xxxhdpi', 'ic_launcher_fg.png'), icons.androidFg, 'png');
+// Splash image or video, found by name in MainActivity (resource shrinking is off).
+const media = splashMedia(payload);
+if (media && media.kind === 'image') write(path.join(main, 'res', 'drawable-nodpi', `w2a_splash_bg.${media.ext}`), media.buf);
+if (media && media.kind === 'video') write(path.join(main, 'res', 'raw', 'w2a_splash.mp4'), media.buf);
 
 if (on('darkMode')) {
   // Dark theme when the phone is in dark mode; web pages then see prefers-color-scheme: dark.

@@ -42,6 +42,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     var navActive: UIColor = .systemBlue
     private var spinner: UIActivityIndicatorView?
     var splashView: UIView?
+    private var splashVideoPlaying = false
+    private var splashVideoEnd: NSObjectProtocol?
     private var splashStarted = Date()
     private var firstPageDone = false
     var lockView: UIView?
@@ -891,6 +893,35 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             overlay.topAnchor.constraint(equalTo: view.topAnchor),
             overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        // Optional full-screen image or short video behind the logo.
+        let fill: UIView.ContentMode = options.str("fit", "cover") == "contain" ? .scaleAspectFit : .scaleAspectFill
+        switch options.str("background", "color") {
+        case "image":
+            let url = ["png", "jpg", "webp"].lazy.compactMap { Bundle.main.url(forResource: "splash_bg", withExtension: $0) }.first
+            if let url, let data = try? Data(contentsOf: url), let picture = UIImage(data: data) {
+                let art = UIImageView(image: picture)
+                art.contentMode = fill
+                art.clipsToBounds = true
+                pin(art, in: overlay)
+            }
+        case "video":
+            if let url = Bundle.main.url(forResource: "splash", withExtension: "mp4") {
+                let player = AVPlayer(url: url)
+                player.isMuted = true
+                let holder = PlayerView()
+                holder.playerLayer.player = player
+                holder.playerLayer.videoGravity = fill == .scaleAspectFit ? .resizeAspect : .resizeAspectFill
+                pin(holder, in: overlay)
+                splashVideoPlaying = true
+                splashVideoEnd = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
+                                                                         object: player.currentItem, queue: .main) { [weak self] _ in
+                    self?.splashVideoEnded()
+                }
+                player.play()
+            }
+        default:
+            break
+        }
         let style = options.str("style", "logo_name")
         let stack = UIStackView()
         stack.axis = .vertical
@@ -898,7 +929,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
         overlay.addSubview(stack)
-        if style != "name", let logo = UIImage(named: "SplashLogo") {
+        if style == "logo" || style == "logo_name", let logo = UIImage(named: "SplashLogo") {
             let image = UIImageView(image: logo)
             image.contentMode = .scaleAspectFill
             image.clipsToBounds = true
@@ -908,7 +939,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             image.heightAnchor.constraint(equalToConstant: 112).isActive = true
             stack.addArrangedSubview(image)
         }
-        if style != "logo" {
+        if style == "name" || style == "logo_name" {
             let name = UILabel()
             name.text = cfg.appName
             name.font = .systemFont(ofSize: 24, weight: .bold)
@@ -927,11 +958,34 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(maxMs)) { [weak self] in self?.hideSplash() }
     }
 
+    private func pin(_ child: UIView, in parent: UIView) {
+        child.translatesAutoresizingMaskIntoConstraints = false
+        parent.addSubview(child)
+        NSLayoutConstraint.activate([
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
+            child.topAnchor.constraint(equalTo: parent.topAnchor),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
+        ])
+    }
+
+    /// The splash waits for its video to end, then for the page (whichever comes last).
+    private func splashVideoEnded() {
+        splashVideoPlaying = false
+        if let token = splashVideoEnd { NotificationCenter.default.removeObserver(token) }
+        splashVideoEnd = nil
+        if firstPageDone { hideSplashSoon() }
+    }
+
     /// Called when the first page finished (or failed).
     private func pageReady() {
         guard !firstPageDone else { return }
         firstPageDone = true
-        guard splashView != nil, let options = cfg.feature("splash") else { return }
+        hideSplashSoon()
+    }
+
+    private func hideSplashSoon() {
+        guard splashView != nil, !splashVideoPlaying, let options = cfg.feature("splash") else { return }
         let minMs = Double(max(0, options.int("minMs", 600)))
         let elapsed = Date().timeIntervalSince(splashStarted) * 1000
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, minMs - elapsed) / 1000) { [weak self] in
@@ -942,6 +996,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private func hideSplash() {
         guard let overlay = splashView else { return }
         splashView = nil
+        splashVideoPlaying = false
+        if let token = splashVideoEnd { NotificationCenter.default.removeObserver(token) }
+        splashVideoEnd = nil
+        for case let holder as PlayerView in overlay.subviews { holder.playerLayer.player?.pause() }
         setNeedsStatusBarAppearanceUpdate()
         UIView.animate(withDuration: 0.3, animations: {
             overlay.alpha = 0
@@ -1015,7 +1073,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
         for slide in slides {
             let page = UIView()
-            let icon = UIImageView(image: UIImage(named: "SplashLogo") ?? symbol("sparkles", 56, .regular))
+            let icon = UIImageView(image: UIImage(named: "SplashLogo") ?? symbol("app.fill", 56, .regular))
             icon.tintColor = fg
             icon.contentMode = .scaleAspectFill
             icon.clipsToBounds = true
@@ -1580,4 +1638,11 @@ final class PaddedLabel: UILabel {
         let s = super.intrinsicContentSize
         return CGSize(width: s.width + insets.left + insets.right, height: s.height + insets.top + insets.bottom)
     }
+}
+
+
+/// A view whose layer plays video, so it resizes with Auto Layout.
+final class PlayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }

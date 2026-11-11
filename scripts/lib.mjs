@@ -77,3 +77,27 @@ export function setEnv(name, value, { secret = false } = {}) {
 export function xml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+/**
+ * The splash image or video sent with the build, checked by its first bytes.
+ * Returns { kind: 'image' | 'video', ext, buf } or null.
+ */
+export function splashMedia(payload) {
+  const sp = payload.config.features && payload.config.features.splash;
+  const media = payload.media || {};
+  if (!sp) return null;
+  if (sp.image && media.splashImage) {
+    const buf = Buffer.from(String(media.splashImage), 'base64');
+    const ext = buf[0] === 0x89 && buf[1] === 0x50 ? 'png'
+      : buf[0] === 0xff && buf[1] === 0xd8 ? 'jpg'
+        : buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP' ? 'webp' : '';
+    if (!ext) throw new Error('Splash image is not a PNG, JPG or WebP file');
+    return { kind: 'image', ext, buf };
+  }
+  if (sp.video && media.splashVideo) {
+    const buf = Buffer.from(String(media.splashVideo), 'base64');
+    if (buf.subarray(4, 8).toString('latin1') !== 'ftyp') throw new Error('Splash video is not an MP4 file');
+    return { kind: 'video', ext: 'mp4', buf };
+  }
+  return null;
+}

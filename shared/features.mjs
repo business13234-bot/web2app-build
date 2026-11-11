@@ -84,10 +84,20 @@ export const FEATURES = [
   {
     id: 'splash', icon: 'wallpaper', group: 'Look', platforms: ['android', 'ios'],
     title: 'Splash screen',
-    desc: 'Your logo on the splash colour while the first page loads.',
+    desc: 'Shows while the first page loads: your colour, a full-screen image or a short video, with your logo on top.',
     fields: [
-      { key: 'style', type: 'select', label: 'Style', default: 'logo_name',
-        options: [['logo', 'Logo only'], ['logo_name', 'Logo and app name'], ['name', 'App name only']] },
+      { key: 'background', type: 'select', label: 'Background', default: 'color',
+        options: [['color', 'Splash colour (set in the Look step)'], ['image', 'Image'], ['video', 'Short video']] },
+      { key: 'image', type: 'media', kind: 'image', label: 'Splash image', showIf: ['background', 'image'],
+        mimes: ['image/png', 'image/jpeg', 'image/webp'], maxBytes: 1_500_000,
+        help: 'Portrait 1080 × 1920 px (9:16). PNG, JPG or WebP, up to 1.5 MB. Keep text and logos in the middle: phones with other shapes trim the edges.' },
+      { key: 'video', type: 'media', kind: 'video', label: 'Splash video', showIf: ['background', 'video'],
+        mimes: ['video/mp4'], maxBytes: 4_000_000, maxSeconds: 8,
+        help: 'MP4 (H.264), portrait 1080 × 1920 px (9:16), up to 8 seconds and 4 MB. Plays once, without sound; the app opens when it ends.' },
+      { key: 'fit', type: 'select', label: 'Fit', default: 'cover', showIf: ['background', 'image', 'video'],
+        options: [['cover', 'Fill the screen (edges may be trimmed)'], ['contain', 'Show all of it (splash colour around it)']] },
+      { key: 'style', type: 'select', label: 'On top', default: 'logo_name',
+        options: [['logo_name', 'Logo and app name'], ['logo', 'Logo only'], ['name', 'App name only'], ['none', 'Nothing']] },
       { key: 'minMs', type: 'int', label: 'Show at least (milliseconds)', default: 600, min: 0, max: 5000 },
       { key: 'maxMs', type: 'int', label: 'Hide after at most (milliseconds)', default: 4000, min: 1000, max: 10000 },
       { key: 'textColor', type: 'color', label: 'Name colour', default: '' },
@@ -136,7 +146,7 @@ export const FEATURES = [
       { key: 'action', type: 'select', label: 'Action', default: 'whatsapp',
         options: [['whatsapp', 'WhatsApp chat'], ['tel', 'Phone call'], ['email', 'Email'], ['url', 'Open a link'], ['share', 'Share the page']] },
       { key: 'value', type: 'text', label: 'Number, email or link', max: 300,
-        help: 'WhatsApp and phone: the number with country code, like +8801712345678.' },
+        help: 'WhatsApp and phone: the number with country code, like +1 555 123 4567 (country code first).' },
       { key: 'icon', type: 'select', label: 'Icon', default: 'chat', icons: true, options: ICON_OPTIONS },
       { key: 'color', type: 'color', label: 'Colour', default: '' },
       { key: 'position', type: 'select', label: 'Position', default: 'right', options: [['right', 'Bottom right'], ['left', 'Bottom left']] },
@@ -553,6 +563,13 @@ function checkField(f, v, where) {
       if (value.length < (f.min || 0)) return { error: `${label}: add at least ${f.min}` };
       return { value };
     }
+    case 'media': {
+      // The file itself travels next to the config (payload.media); the config keeps its type.
+      const s = str(v, 40);
+      if (!s) return { value: '' };
+      if (!f.mimes.includes(s)) return { error: `${label}: this file type cannot be used` };
+      return { value: s };
+    }
     case 'json': {
       const s = typeof v === 'string' ? v : '';
       if (!s.trim()) return f.required ? { error: `${label}: upload the file` } : { value: '' };
@@ -623,6 +640,12 @@ export function validateFeatures(input, packageId) {
     }
     if (feature.id === 'splash' && out.maxMs < out.minMs) {
       return { ok: false, error: 'Splash screen: "at most" must be larger than "at least"' };
+    }
+    if (feature.id === 'splash' && out.background === 'image' && !out.image) {
+      return { ok: false, error: 'Splash screen: add the splash image' };
+    }
+    if (feature.id === 'splash' && out.background === 'video' && !out.video) {
+      return { ok: false, error: 'Splash screen: add the splash video' };
     }
     features[feature.id] = out;
   }

@@ -37,6 +37,8 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.media.MediaPlayer;
+import android.widget.VideoView;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
@@ -167,6 +169,9 @@ public class MainActivity extends Activity {
     private volatile String currentUrl = "";
     private boolean firstPageDone;
     private long splashShownAt;
+    private boolean splashPageReady;
+    private boolean splashVideoPlaying;
+    private MediaPlayer splashPlayer;
     private boolean splashHidden;
     private boolean locked;
     private long leftAt;
@@ -433,7 +438,13 @@ public class MainActivity extends Activity {
                 tick(swipe);
                 web.reload();
             });
-            swipe.setOnChildScrollUpCallback((parent, child) -> web.getScrollY() > 0);
+            // Most sites scroll inside an element, not the page, so the WebView's own position stays 0.
+            // The page tells us (on every touch) whether what is under the finger is at its top;
+            // only then can a pull start, and it must be a deliberate pull, like in Chrome.
+            swipe.setOnChildScrollUpCallback((parent, child) -> web.getScrollY() > 0 || (!pageAtTop && !loadFailed));
+            swipe.setDistanceToTriggerSync(dp(140));
+            swipe.setSlingshotDistance(dp(160));
+            web.addJavascriptInterface(new PullBridge(), "__w2aPull");
             content.addView(swipe, matchParent());
         } else {
             content.addView(web, matchParent());
@@ -883,18 +894,33 @@ public class MainActivity extends Activity {
         splash = new FrameLayout(this);
         splash.setBackgroundColor(bg);
         splash.setClickable(true);
+        // Optional full-screen image or short video behind the logo.
+        boolean contain = "contain".equals(o.optString("fit", "cover"));
+        String background = o.optString("background", "color");
+        if ("image".equals(background)) {
+            int id = getResources().getIdentifier("w2a_splash_bg", "drawable", getPackageName());
+            if (id != 0) {
+                ImageView art = new ImageView(this);
+                art.setImageResource(id);
+                art.setScaleType(contain ? ImageView.ScaleType.FIT_CENTER : ImageView.ScaleType.CENTER_CROP);
+                splash.addView(art, matchParent());
+            }
+        } else if ("video".equals(background)) {
+            int id = getResources().getIdentifier("w2a_splash", "raw", getPackageName());
+            if (id != 0) splash.addView(splashVideo(id, contain), matchParent());
+        }
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
         String style = o.optString("style", "logo_name");
-        if (!"name".equals(style)) {
+        if ("logo".equals(style) || "logo_name".equals(style)) {
             ImageView logo = roundLogo(112);
             logo.setScaleX(0.86f);
             logo.setScaleY(0.86f);
             logo.animate().scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(new OvershootInterpolator(1.6f)).start();
             box.addView(logo);
         }
-        if (!"logo".equals(style)) {
+        if ("name".equals(style) || "logo_name".equals(style)) {
             TextView name = text(getString(R.string.app_name), 24, Config.color(o.optString("textColor"), Config.onColor(bg)), true);
             name.setGravity(Gravity.CENTER);
             name.setPadding(dp(24), dp(18), dp(24), 0);
@@ -910,9 +936,58 @@ public class MainActivity extends Activity {
         ui.postDelayed(this::hideSplash, Math.max(1000, o.optInt("maxMs", 4000)));
     }
 
+    /** Plays the splash video once, muted, filling or fitting the screen; the splash waits for its end. */
+    private View splashVideo(int rawId, boolean contain) {
+        final FrameLayout holder = new FrameLayout(this);
+        final VideoView video = new VideoView(this);
+        holder.addView(video, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+        video.setVideoURI(Uri.parse("android.resource://" + getPackageName() + "/" + rawId));
+        video.setOnPreparedListener(mp -> {
+            splashPlayer = mp;
+            mp.setVolume(0f, 0f);
+            fitVideo(holder, video, mp.getVideoWidth(), mp.getVideoHeight(), contain);
+            video.start();
+        });
+        video.setOnCompletionListener(mp -> splashVideoEnded());
+        video.setOnErrorListener((mp, what, extra) -> {
+            splashVideoEnded();
+            return true;
+        });
+        splashVideoPlaying = true;
+        return holder;
+    }
+
+    /** Cover: the video is sized larger than the screen and centred (the splash clips it). */
+    private void fitVideo(FrameLayout holder, VideoView video, int vw, int vh, boolean contain) {
+        if (vw <= 0 || vh <= 0) return;
+        int w = holder.getWidth();
+        int h = holder.getHeight();
+        if (w == 0 || h == 0) {
+            holder.post(() -> fitVideo(holder, video, vw, vh, contain));
+            return;
+        }
+        float scale = contain ? Math.min((float) w / vw, (float) h / vh) : Math.max((float) w / vw, (float) h / vh);
+        video.setLayoutParams(new FrameLayout.LayoutParams(Math.round(vw * scale), Math.round(vh * scale), Gravity.CENTER));
+    }
+
+    private void splashVideoEnded() {
+        splashVideoPlaying = false;
+        maybeHideSplash();
+    }
+
+    private void releaseSplashVideo() {
+        if (splashPlayer != null) {
+            try { splashPlayer.stop(); } catch (Exception ignored) { } // VideoView frees it when removed
+            splashPlayer = null;
+        }
+    }
+
     private void maybeHideSplash() {
         JSONObject o = f("splash");
         if (splash == null || o == null || splashHidden) return;
+        if (splashVideoPlaying) return; // the video's end hides it (or the "at most" time)
+        if (!splashPageReady) return;
         long wait = o.optInt("minMs", 600) - (SystemClock.uptimeMillis() - splashShownAt);
         ui.postDelayed(this::hideSplash, Math.max(0, wait));
     }
@@ -925,6 +1000,7 @@ public class MainActivity extends Activity {
             @Override
             public void onAnimationEnd(Animator animation) {
                 stage.removeView(s);
+                releaseSplashVideo();
                 splash = null;
                 if (locked) authenticate();
                 else maybeAskPermissions();
@@ -1488,6 +1564,24 @@ public class MainActivity extends Activity {
         if (v == null || f("haptics") == null) return;
         v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
     }
+
+    /** Pull to refresh: is the scroll area under the finger at its top? (see PULL_JS) */
+    private volatile boolean pageAtTop = true;
+
+    private class PullBridge {
+        @JavascriptInterface
+        public void atTop(boolean top) {
+            pageAtTop = top;
+        }
+    }
+
+    /** On each touch: finds the scrolling element under the finger and reports if it is at its top. */
+    private static final String PULL_JS = "(function(){if(window.__w2aPullOn)return;window.__w2aPullOn=1;"
+            + "function top(t){for(var e=t;e&&e.nodeType===1&&e!==document.body&&e!==document.documentElement;e=e.parentElement){"
+            + "var o=getComputedStyle(e).overflowY;if((o==='auto'||o==='scroll'||o==='overlay')&&e.scrollHeight>e.clientHeight+1)"
+            + "return e.scrollTop<=0;}var r=document.scrollingElement||document.documentElement;return !r||r.scrollTop<=0;}"
+            + "document.addEventListener('touchstart',function(ev){try{__w2aPull.atTop(ev.touches.length===1&&top(ev.target));}"
+            + "catch(x){}},{passive:true,capture:true});})();";
 
     private class TapBridge {
         @JavascriptInterface
@@ -2592,6 +2686,10 @@ public class MainActivity extends Activity {
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        // Smoother scrolling: draw the parts just off screen ahead of time, and keep the page's
+        // renderer at full priority while the app is in front.
+        s.setOffscreenPreRaster(true);
+        if (Build.VERSION.SDK_INT >= 26) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
@@ -2767,6 +2865,7 @@ public class MainActivity extends Activity {
     }
 
     private void inject() {
+        if (swipe != null) web.evaluateJavascript(PULL_JS, null);
         if (f("desktopMode") != null) {
             web.evaluateJavascript("(function(){var m=document.querySelector('meta[name=viewport]');"
                     + "if(!m){m=document.createElement('meta');m.name='viewport';"
@@ -2896,6 +2995,7 @@ public class MainActivity extends Activity {
             }
             if (!firstPageDone) {
                 firstPageDone = true;
+                splashPageReady = true;
                 maybeHideSplash();
                 maybeAskRating();
             }
@@ -2910,6 +3010,7 @@ public class MainActivity extends Activity {
                 offline.setVisibility(View.VISIBLE);
                 offline.setAlpha(0f);
                 offline.animate().alpha(1f).setDuration(220).start();
+                splashPageReady = true;
                 maybeHideSplash();
             }
         }
@@ -3425,6 +3526,8 @@ public class MainActivity extends Activity {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         lastTouch = SystemClock.uptimeMillis();
+        // Until the page answers for this touch, a pull does not start a refresh.
+        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN && swipe != null) pageAtTop = false;
         return super.dispatchTouchEvent(ev);
     }
 
