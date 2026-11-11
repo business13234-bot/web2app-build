@@ -36,8 +36,18 @@ struct AppConfig {
         return f
     }
 
+    /// Address scheme of the pages bundled in the app (apps made from an HTML file or a ZIP).
+    static let localScheme = "w2a-app"
+
+    var isLocal: Bool { return string("source") == "local" }
+
     var homeURL: URL {
-        return URL(string: string("url")) ?? URL(string: "about:blank")!
+        let raw = string("url")
+        if isLocal, var comps = URLComponents(string: raw) {
+            comps.scheme = AppConfig.localScheme
+            if let url = comps.url { return url }
+        }
+        return URL(string: raw) ?? URL(string: "about:blank")!
     }
 
     var appName: String {

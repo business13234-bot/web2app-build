@@ -102,6 +102,14 @@ export const PERMISSIONS = [
 export const PERMISSION_IDS = PERMISSIONS.map((p) => p.id);
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Apps made from uploaded HTML files open this address. The apps serve it from the files inside
+ * the app (Android: WebView asset loader host, iOS: the same host through a scheme handler),
+ * so it never reaches the internet.
+ */
+export const LOCAL_HOST = 'appassets.androidplatform.net';
+export const LOCAL_URL = `https://${LOCAL_HOST}/index.html`;
 const PACKAGE = /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/;
 const BUNDLE = /^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z0-9][a-zA-Z0-9-]*)+$/;
 const VERSION = /^\d{1,4}(\.\d{1,4}){0,2}$/;
@@ -124,14 +132,19 @@ export function validateConfig(input) {
   const c = input && typeof input === 'object' ? input : {};
   const fail = (error) => ({ ok: false, error });
 
+  const source = c.source === 'local' ? 'local' : 'url';
   let url;
-  try {
-    url = new URL(str(c.url, 2000));
-  } catch {
-    return fail('url: valid website address needed');
+  if (source === 'local') {
+    url = new URL(LOCAL_URL);
+  } else {
+    try {
+      url = new URL(str(c.url, 2000));
+    } catch {
+      return fail('url: valid website address needed');
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return fail('url: must start with https:// or http://');
+    if (!url.hostname.includes('.') || url.hostname === LOCAL_HOST) return fail('url: must be a public website');
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return fail('url: must start with https:// or http://');
-  if (!url.hostname.includes('.')) return fail('url: must be a public website');
 
   const appName = str(c.appName, 30);
   if (!appName) return fail('appName: required');
@@ -152,7 +165,7 @@ export function validateConfig(input) {
   }
 
   const themeColor = str(c.themeColor || '#1565C0', 7);
-  const splashColor = str(c.splashColor || '#FFFFFF', 7);
+  let splashColor = str(c.splashColor || '#FFFFFF', 7);
   const iconBgColor = str(c.iconBgColor || '#FFFFFF', 7);
   if (!HEX.test(themeColor) || !HEX.test(splashColor) || !HEX.test(iconBgColor)) {
     return fail('colors: use #RRGGBB');
@@ -179,11 +192,14 @@ export function validateConfig(input) {
 
   const feat = validateFeatures(c.features, packageId);
   if (!feat.ok) return fail(feat.error);
+  // The splash screen's own colour is the launch colour; without it, the colour sent (or white).
+  if (feat.features.splash && HEX.test(feat.features.splash.color || '')) splashColor = feat.features.splash.color;
 
   return {
     ok: true,
     config: {
       url: url.toString(),
+      source,
       appName,
       packageId,
       versionName,

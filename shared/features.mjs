@@ -87,7 +87,9 @@ export const FEATURES = [
     desc: 'Shows while the first page loads: your colour, a full-screen image or a short video, with your logo on top.',
     fields: [
       { key: 'background', type: 'select', label: 'Background', default: 'color',
-        options: [['color', 'Splash colour (set in the Look step)'], ['image', 'Image'], ['video', 'Short video']] },
+        options: [['color', 'Solid colour'], ['image', 'Image'], ['video', 'Short video']] },
+      { key: 'color', type: 'color', label: 'Background colour', default: '#FFFFFF',
+        help: 'Also shown for a moment while the phone starts the app, and around an image or video that does not fill the screen.' },
       { key: 'image', type: 'media', kind: 'image', label: 'Splash image', showIf: ['background', 'image'],
         mimes: ['image/png', 'image/jpeg', 'image/webp'], maxBytes: 1_500_000,
         help: 'Portrait 1080 × 1920 px (9:16). PNG, JPG or WebP, up to 1.5 MB. Keep text and logos in the middle: phones with other shapes trim the edges.' },
@@ -95,9 +97,11 @@ export const FEATURES = [
         mimes: ['video/mp4'], maxBytes: 4_000_000, maxSeconds: 8,
         help: 'MP4 (H.264), portrait 1080 × 1920 px (9:16), up to 8 seconds and 4 MB. Plays once, without sound; the app opens when it ends.' },
       { key: 'fit', type: 'select', label: 'Fit', default: 'cover', showIf: ['background', 'image', 'video'],
-        options: [['cover', 'Fill the screen (edges may be trimmed)'], ['contain', 'Show all of it (splash colour around it)']] },
+        options: [['cover', 'Fill the screen (edges may be trimmed)'], ['contain', 'Show all of it (background colour around it)']] },
       { key: 'style', type: 'select', label: 'On top', default: 'logo_name',
         options: [['logo_name', 'Logo and app name'], ['logo', 'Logo only'], ['name', 'App name only'], ['none', 'Nothing']] },
+      { key: 'animation', type: 'select', label: 'Logo animation', default: 'pop',
+        options: [['pop', 'Pop in'], ['pulse', 'Gentle pulse'], ['rise', 'Rise and fade in'], ['none', 'No animation']] },
       { key: 'minMs', type: 'int', label: 'Show at least (milliseconds)', default: 600, min: 0, max: 5000 },
       { key: 'maxMs', type: 'int', label: 'Hide after at most (milliseconds)', default: 4000, min: 1000, max: 10000 },
       { key: 'textColor', type: 'color', label: 'Name colour', default: '' },
@@ -482,6 +486,90 @@ export const FEATURES = [
     desc: 'Music, radio and podcasts keep playing when the app is closed or the screen is off.',
     fields: [],
   },
+
+  // ------------------------------------------------------------ added in 1.4
+  {
+    id: 'progressBar', icon: 'linear_scale', group: 'Look', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Reading progress',
+    desc: 'A thin line at the top fills up as the user scrolls down a long page.',
+    fields: [
+      { key: 'color', type: 'color', label: 'Colour', default: '' },
+      { key: 'height', type: 'int', label: 'Thickness (pixels)', default: 3, min: 2, max: 8 },
+    ],
+  },
+  {
+    id: 'appFont', icon: 'font_download', group: 'Look', platforms: ['android', 'ios'], added: '1.4',
+    title: 'App font',
+    desc: 'Shows the whole website in a font you choose. Icons on the page are left alone.',
+    fields: [
+      { key: 'font', type: 'select', label: 'Font', default: 'Poppins',
+        options: [['Poppins', 'Poppins'], ['Inter', 'Inter'], ['Roboto', 'Roboto'], ['Open Sans', 'Open Sans'], ['Lato', 'Lato'],
+          ['Montserrat', 'Montserrat'], ['Nunito', 'Nunito'], ['Noto Sans', 'Noto Sans (many languages)'],
+          ['Hind Siliguri', 'Hind Siliguri (Bangla)'], ['Noto Serif', 'Noto Serif'], ['system', 'Phone font']] },
+    ],
+  },
+  {
+    id: 'imageViewer', icon: 'zoom_in', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Photo viewer',
+    desc: 'Tap a picture on the page to see it full screen; pinch or double-tap to zoom.',
+    fields: [
+      { key: 'minSize', type: 'int', label: 'Only pictures at least this wide (pixels)', default: 120, min: 40, max: 600 },
+    ],
+  },
+  {
+    id: 'autoRefresh', icon: 'autorenew', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Auto refresh',
+    desc: 'Reloads the page on a timer, for live scores, prices or dashboards. Never while someone is typing.',
+    fields: [
+      { key: 'minutes', type: 'int', label: 'Every (minutes)', default: 5, min: 1, max: 240 },
+    ],
+  },
+  {
+    id: 'resumeReload', icon: 'restart_alt', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Fresh on return',
+    desc: 'Reloads the page when the user comes back to the app after a while, so it never shows old content.',
+    fields: [
+      { key: 'minutes', type: 'int', label: 'After being away for (minutes)', default: 30, min: 1, max: 1440 },
+    ],
+  },
+  {
+    id: 'videoRotate', icon: 'screen_rotation_alt', group: 'Behaviour', platforms: ['android'], added: '1.4',
+    title: 'Landscape video',
+    desc: 'Full-screen videos turn sideways automatically, and the app turns back when they close.',
+    fields: [],
+  },
+  {
+    id: 'dataSaver', icon: 'data_saver_on', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Data saver',
+    desc: 'On mobile data, pictures are not loaded, so pages open faster and use less data. Wi-Fi is not affected.',
+    fields: [],
+  },
+  {
+    id: 'stayInApp', icon: 'shield', group: 'Privacy', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Only my website',
+    desc: 'Links to other websites do nothing, so users always stay on your site. Phone, email and map links still work.',
+    fields: [
+      { key: 'message', type: 'text', label: 'Message when a link is blocked', default: 'This link cannot be opened here.', max: 80 },
+    ],
+  },
+  {
+    id: 'errorPage', icon: 'report', group: 'Behaviour', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Friendly error page',
+    desc: 'When your server has a problem, users see a clean page with Try again and Home buttons instead of a raw error.',
+    fields: [
+      { key: 'title', type: 'text', label: 'Title', default: 'Something went wrong', max: 50 },
+      { key: 'message', type: 'text', label: 'Message', default: 'We could not load this page. Please try again in a moment.', max: 140 },
+      { key: 'notFound', type: 'bool', label: 'Also for "page not found" (404)', default: false },
+    ],
+  },
+  {
+    id: 'speech', icon: 'campaign', group: 'Code', platforms: ['android', 'ios'], added: '1.4',
+    title: 'Read aloud',
+    desc: 'Your page can speak text with the phone voice: Web2AppSpeech.speak("Hello", "en-US") and Web2AppSpeech.stop().',
+    fields: [
+      { key: 'rate', type: 'int', label: 'Speed (%)', default: 100, min: 50, max: 200 },
+    ],
+  },
 ];
 
 export const FEATURE_IDS = FEATURES.map((f) => f.id);
@@ -640,6 +728,9 @@ export function validateFeatures(input, packageId) {
     }
     if (feature.id === 'splash' && out.maxMs < out.minMs) {
       return { ok: false, error: 'Splash screen: "at most" must be larger than "at least"' };
+    }
+    if (feature.id === 'stayInApp' && src.inAppBrowser && src.inAppBrowser.enabled === true) {
+      return { ok: false, error: 'Only my website: turn off the In-app browser, other sites cannot open at all' };
     }
     if (feature.id === 'splash' && out.background === 'image' && !out.image) {
       return { ok: false, error: 'Splash screen: add the splash image' };

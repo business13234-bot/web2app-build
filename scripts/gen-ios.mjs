@@ -3,7 +3,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PERMISSIONS } from '../shared/catalog.mjs';
-import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, splashMedia } from './lib.mjs';
+import { pageScript } from '../shared/inject.mjs';
+import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, splashMedia, siteFiles } from './lib.mjs';
 
 const [payloadFile, outDir] = process.argv.slice(2);
 if (!payloadFile || !outDir) {
@@ -23,7 +24,7 @@ const feat = cfg.features || {};
 const on = (id) => Boolean(feat[id] && feat[id].enabled);
 
 // ---- runtime config read by AppConfig.swift ----
-const appConfig = { ...cfg };
+const appConfig = { ...cfg, pageJs: pageScript(cfg) };
 if (appConfig.features && appConfig.features.push) {
   // Push is Android only; its Firebase file is not needed here.
   appConfig.features = { ...appConfig.features, push: { ...appConfig.features.push, googleServices: undefined } };
@@ -49,6 +50,13 @@ write(path.join(assets, 'SplashLogo.imageset', 'Contents.json'), JSON.stringify(
 // Splash image or video, copied into the app bundle (everything in Sources is bundled).
 const media = splashMedia(payload);
 if (media) write(path.join(out, 'Sources', media.kind === 'image' ? `splash_bg.${media.ext}` : 'splash.mp4'), media.buf);
+
+// Apps made from uploaded files: the site is bundled as a folder (kept as folders, not flattened).
+const site = siteFiles(payload);
+if (site) {
+  for (const file of site) write(path.join(out, 'www', ...file.path.split('/')), file.buf);
+  console.log(`Site files: ${site.length}`);
+}
 
 const hex = (i) => `0x${cfg.splashColor.slice(i, i + 2).toUpperCase()}`;
 write(path.join(assets, 'LaunchBg.colorset', 'Contents.json'), JSON.stringify({
@@ -109,7 +117,7 @@ const spec = {
     App: {
       type: 'application',
       platform: 'iOS',
-      sources: ['Sources'],
+      sources: site ? ['Sources', { path: 'www', type: 'folder', buildPhase: 'resources' }] : ['Sources'],
       info: { path: 'Info.plist', properties: info },
       settings: {
         base: {

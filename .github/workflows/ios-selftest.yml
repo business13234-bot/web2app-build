@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       variant:
-        description: Feature option set (a, b, or c = features added in 1.2)
+        description: Feature option set (a, b; c = features added in 1.2; d = added in 1.4; e = app from a ZIP)
         required: true
         default: a
         type: choice
-        options: [a, b, c]
+        options: [a, b, c, d, e]
 
 defaults:
   run:
@@ -82,6 +82,7 @@ jobs:
         run: |
           set +e
           TEST=testVariantA; [ "$VARIANT" = b ] && TEST=testVariantB; [ "$VARIANT" = c ] && TEST=testVariantC
+          [ "$VARIANT" = d ] && TEST=testVariantD; [ "$VARIANT" = e ] && TEST=testVariantE
           xcodebuild test -project App.xcodeproj -scheme App -destination "id=$UDID" \
             -only-testing:AppUITests/AppUITests/$TEST -resultBundlePath "$RUNNER_TEMP/main.xcresult" \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/test.log" | grep -E "W2A-|error:|\*\* TEST|Testing failed"

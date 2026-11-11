@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { validateConfig } from '../shared/catalog.mjs';
+import { checkZipSite, checkHtmlFile, MAX_SITE_BYTES } from '../shared/site.mjs';
 
 /** Reads the build request and re-validates the config (the scripts never trust raw input). */
 export function readPayload(file) {
@@ -100,4 +102,31 @@ export function splashMedia(payload) {
     return { kind: 'video', ext: 'mp4', buf };
   }
   return null;
+}
+
+/**
+ * The website files of an app made from an uploaded HTML file or ZIP.
+ * Returns [{ path, buf }] (paths relative to the site folder) or null for a normal website app.
+ */
+export function siteFiles(payload) {
+  if (payload.config.source !== 'local') return null;
+  const src = payload.source || {};
+  const bytes = new Uint8Array(Buffer.from(String(src.data || ''), 'base64'));
+  if (src.type === 'html') {
+    checkHtmlFile(bytes);
+    return [{ path: 'index.html', buf: Buffer.from(bytes) }];
+  }
+  if (src.type !== 'zip') throw new Error('The site files are missing');
+  const { files } = checkZipSite(bytes);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return files.map((e) => {
+    if (dv.getUint32(e.offset, true) !== 0x04034b50) throw new Error(`Damaged ZIP entry: ${e.name}`);
+    const start = e.offset + 30 + dv.getUint16(e.offset + 26, true) + dv.getUint16(e.offset + 28, true);
+    const data = Buffer.from(bytes.subarray(start, start + e.compSize));
+    const buf = e.method === 8 ? zlib.inflateRawSync(data, { maxOutputLength: MAX_SITE_BYTES }) : data;
+    if (buf.length !== e.size) throw new Error(`Damaged ZIP entry: ${e.name}`);
+    // The first page is found as index.html whatever its case in the ZIP.
+    const p = e.path.toLowerCase() === 'index.html' ? 'index.html' : e.path;
+    return { path: p, buf };
+  });
 }

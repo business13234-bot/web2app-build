@@ -304,6 +304,108 @@ final class AppUITests: XCTestCase {
         }
     }
 
+    // MARK: variant d — features added in 1.4 (start page: /feat)
+
+    private func label(beginning prefix: String, _ timeout: TimeInterval = 8) -> String {
+        let q = app.webViews.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
+        return q.waitForExistence(timeout: timeout) ? q.label : ""
+    }
+
+    private func tapWebLink(_ text: String) -> Bool {
+        let l = app.webViews.links[text].firstMatch
+        guard l.waitForExistence(timeout: 6) else { return false }
+        l.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        return true
+    }
+
+    func testVariantD() {
+        app.launch()
+        shot("d-splash")
+        allowAlerts(4)
+        let lockShown = app.otherElements["LockScreen"].waitForExistence(timeout: 15)
+        shot("d-lock")
+        check("themed lock screen", lockShown && app.staticTexts["Locked for your privacy"].exists)
+        check("lock opens", passLock())
+        check("feature page loads", web("Feature page", 15))
+        let fs = label(beginning: "font=", 10)
+        check("app font", value(fs, "font") == "Poppins", fs)
+        check("progress bar", value(fs, "bar") == "true", fs)
+        check("speech bridge", value(fs, "speech") == "object", fs)
+        shot("d-feature-page")
+
+        // Read aloud: the page shows speaking=true while the voice talks.
+        let speak = app.webViews.buttons["Speak"].firstMatch
+        if speak.waitForExistence(timeout: 5) { speak.tap() }
+        let talking = app.webViews.staticTexts["speaking=true"].waitForExistence(timeout: 8)
+        check("speech speaks", talking)
+
+        // Stay in app: an outside link is not opened.
+        check("outside link tapped", tapWebLink("External site"))
+        check("stay in app message", snack("Stay-in-app test message", 6))
+        check("still on page", web("Feature page", 3))
+
+        // Friendly error page for a server error and a missing page.
+        check("server error link", tapWebLink("Server error"))
+        check("error page on 500", app.staticTexts["Oops test"].waitForExistence(timeout: 10))
+        shot("d-error-page")
+        app.buttons["Try again"].firstMatch.tap()
+        check("error page stays on retry", app.staticTexts["Oops test"].waitForExistence(timeout: 8))
+        app.buttons["Home"].firstMatch.tap()
+        check("home leaves error page", web("Feature page", 10) && !app.staticTexts["Oops test"].isHittable)
+        check("missing page link", tapWebLink("Missing page"))
+        check("error page on 404", app.staticTexts["Oops test"].waitForExistence(timeout: 10))
+        app.buttons["Home"].firstMatch.tap()
+        _ = web("Feature page", 10)
+
+        // Picture viewer: tap a big picture, it opens full screen with a close button.
+        let pic = app.webViews.images["big photo"].firstMatch
+        if pic.waitForExistence(timeout: 6) {
+            pic.swipeUp()
+            pic.tap()
+        }
+        let close = app.webViews.buttons["Close"].firstMatch
+        check("picture viewer opens", close.waitForExistence(timeout: 6))
+        shot("d-viewer")
+        pic.doubleTap()
+        shot("d-viewer-zoom")
+        if close.exists { close.tap() }
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
+        check("picture viewer closes", XCTWaiter().wait(for: [gone], timeout: 4) == .completed)
+
+        // Fresh page after a long break (1 minute): the page load time changes.
+        let before = value(label(beginning: "font=", 8), "loaded")
+        XCUIDevice.shared.press(.home)
+        sleep(66)
+        app.activate()
+        passLock()
+        sleep(3)
+        let after = value(label(beginning: "font=", 10), "loaded")
+        check("reload after a long break", !before.isEmpty && !after.isEmpty && before != after, "\(before) -> \(after)")
+        finish()
+    }
+
+    // MARK: variant e — an app made from a ZIP: pages, CSS, JS, fetch and pictures come from inside the app
+
+    func testVariantE() {
+        app.launch()
+        allowAlerts(3)
+        check("zip first page", web("Offline ZIP site", 20))
+        let js = label(beginning: "zip js", 10)
+        check("zip script and fetch", js.contains("w2a-app:") && js.contains("json loaded"), js)
+        check("zip picture", app.webViews.images["logo"].waitForExistence(timeout: 5))
+        shot("e-home")
+        check("zip link", tapWebLink("About page"))
+        check("zip second page", web("About (from ZIP)", 8))
+        shot("e-about")
+        check("zip back link", tapWebLink("Back home"))
+        check("zip home again", web("Offline ZIP site", 8))
+        check("zip folder link", tapWebLink("Docs folder"))
+        check("zip folder index", web("Docs index", 8))
+        relaunch()
+        check("zip after relaunch", web("Offline ZIP site", 20))
+        finish()
+    }
+
     func testVariantC() {
         server("/set-version?v=1")
         server("/set-down?on=0")

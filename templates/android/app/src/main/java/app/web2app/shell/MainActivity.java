@@ -38,6 +38,8 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.media.MediaPlayer;
+import android.speech.tts.TextToSpeech;
+import android.webkit.MimeTypeMap;
 import android.widget.VideoView;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
@@ -184,6 +186,17 @@ public class MainActivity extends Activity {
     private ConnectivityManager.NetworkCallback netCallback;
     private String injectCss = "";
     private String injectJs = "";
+    private String pageJs = "";
+    private static final String LOCAL_HOST = "appassets.androidplatform.net";
+    private TextToSpeech tts;
+    private boolean ttsReady;
+    private String pendingSpeech;
+    private String pendingLang;
+    private ValueAnimator splashPulse;
+    private LinearLayout errorView;
+    private String httpErrorUrl;
+    private long pausedAt;
+    private Integer orientationBeforeVideo;
 
     private ValueCallback<Uri[]> fileCallback;
     private Uri cameraUri;
@@ -276,6 +289,7 @@ public class MainActivity extends Activity {
         if (f("customCss") != null) css.append(f("customCss").optString("css", ""));
         injectCss = css.toString();
         if (f("customJs") != null) injectJs = f("customJs").optString("js", "");
+        pageJs = cfg.optString("pageJs", "");
     }
 
     private static void addHosts(JSONArray list, List<String> into) {
@@ -340,6 +354,7 @@ public class MainActivity extends Activity {
             case "print": return R.drawable.w2a_print;
             case "open_in_new": return R.drawable.w2a_open_in_new;
             case "more_vert": return R.drawable.w2a_more_vert;
+            case "fingerprint": return R.drawable.w2a_fingerprint;
             default: return R.drawable.w2a_home;
         }
     }
@@ -913,20 +928,22 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
         String style = o.optString("style", "logo_name");
+        String anim = o.optString("animation", "pop");
         if ("logo".equals(style) || "logo_name".equals(style)) {
-            ImageView logo = roundLogo(112);
-            logo.setScaleX(0.86f);
-            logo.setScaleY(0.86f);
-            logo.animate().scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(new OvershootInterpolator(1.6f)).start();
+            final ImageView logo = roundLogo(112);
+            animateSplashLogo(logo, anim);
             box.addView(logo);
         }
         if ("name".equals(style) || "logo_name".equals(style)) {
             TextView name = text(getString(R.string.app_name), 24, Config.color(o.optString("textColor"), Config.onColor(bg)), true);
             name.setGravity(Gravity.CENTER);
             name.setPadding(dp(24), dp(18), dp(24), 0);
-            name.setAlpha(0f);
-            name.setTranslationY(dp(10));
-            name.animate().alpha(1f).translationY(0).setStartDelay(160).setDuration(420).start();
+            if (!"none".equals(anim)) {
+                name.setAlpha(0f);
+                name.setTranslationY(dp(10));
+                name.animate().alpha(1f).translationY(0).setStartDelay(220).setDuration(460)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+            }
             box.addView(name);
         }
         splash.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -934,6 +951,38 @@ public class MainActivity extends Activity {
         stage.addView(splash, matchParent());
         splashShownAt = SystemClock.uptimeMillis();
         ui.postDelayed(this::hideSplash, Math.max(1000, o.optInt("maxMs", 4000)));
+    }
+
+    /** The logo's entrance on the splash screen: pop in, a gentle pulse, rise and fade in, or none. */
+    private void animateSplashLogo(final ImageView logo, String anim) {
+        switch (anim) {
+            case "none":
+                return;
+            case "rise":
+                logo.setAlpha(0f);
+                logo.setTranslationY(dp(28));
+                logo.animate().alpha(1f).translationY(0).setDuration(650).setInterpolator(new DecelerateInterpolator(2f)).start();
+                return;
+            default:
+                logo.setAlpha(0f);
+                logo.setScaleX(0.6f);
+                logo.setScaleY(0.6f);
+                logo.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(560)
+                        .setInterpolator(new OvershootInterpolator(1.8f)).start();
+                if ("pulse".equals(anim)) {
+                    splashPulse = ValueAnimator.ofFloat(1f, 1.07f);
+                    splashPulse.setDuration(720);
+                    splashPulse.setStartDelay(600);
+                    splashPulse.setRepeatMode(ValueAnimator.REVERSE);
+                    splashPulse.setRepeatCount(ValueAnimator.INFINITE);
+                    splashPulse.addUpdateListener(a -> {
+                        float v = (float) a.getAnimatedValue();
+                        logo.setScaleX(v);
+                        logo.setScaleY(v);
+                    });
+                    splashPulse.start();
+                }
+        }
     }
 
     /** Plays the splash video once, muted, filling or fitting the screen; the splash waits for its end. */
@@ -995,6 +1044,10 @@ public class MainActivity extends Activity {
     private void hideSplash() {
         if (splash == null || splashHidden) return;
         splashHidden = true;
+        if (splashPulse != null) {
+            splashPulse.cancel();
+            splashPulse = null;
+        }
         final View s = splash;
         s.animate().alpha(0f).scaleX(1.04f).scaleY(1.04f).setDuration(320).setListener(new AnimatorListenerAdapter() {
             @Override
@@ -1116,34 +1169,87 @@ public class MainActivity extends Activity {
         else stage.addView(onboarding, at, matchParent());
     }
 
+    /** Mixes two colours: amount 0 = a, 1 = b. */
+    private static int blend(int a, int b, float amount) {
+        float k = 1f - amount;
+        return Color.rgb(Math.round(Color.red(a) * k + Color.red(b) * amount),
+                Math.round(Color.green(a) * k + Color.green(b) * amount),
+                Math.round(Color.blue(a) * k + Color.blue(b) * amount));
+    }
+
     private void lock() {
         locked = true;
         if (lockView == null) {
-            int fg = Config.onColor(theme);
+            boolean light = Config.isLight(theme);
+            int top = light ? theme : blend(theme, Color.WHITE, 0.10f);
+            int bottom = light ? blend(theme, Color.BLACK, 0.14f) : blend(theme, Color.BLACK, 0.50f);
+            int fg = light ? 0xFF15181D : Color.WHITE;
             lockView = new FrameLayout(this);
-            lockView.setBackgroundColor(theme);
+            lockView.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom}));
             lockView.setClickable(true);
+
             LinearLayout box = new LinearLayout(this);
             box.setOrientation(LinearLayout.VERTICAL);
-            box.setGravity(Gravity.CENTER);
-            FrameLayout badge = new FrameLayout(this);
+            box.setGravity(Gravity.CENTER_HORIZONTAL);
+            box.setPadding(dp(32), 0, dp(32), 0);
+
+            ImageView logo = roundLogo(92);
+            logo.setElevation(dp(12));
+            box.addView(logo);
+
+            TextView name = text(getString(R.string.app_name), 24, fg, true);
+            name.setGravity(Gravity.CENTER);
+            name.setPadding(0, dp(22), 0, 0);
+            box.addView(name);
+
+            JSONObject o = f("appLock");
+            String title = o != null ? o.optString("title", "Unlock") : "Unlock";
+            TextView sub = text("Locked for your privacy", 14, (fg & 0x00FFFFFF) | 0xB3000000, false);
+            sub.setGravity(Gravity.CENTER);
+            sub.setPadding(0, dp(6), 0, 0);
+            box.addView(sub);
+
+            // Round fingerprint button, the main way in.
+            FrameLayout fp = new FrameLayout(this);
             GradientDrawable disc = new GradientDrawable();
             disc.setShape(GradientDrawable.OVAL);
-            disc.setColor((fg & 0x00FFFFFF) | 0x22000000);
-            badge.setBackground(disc);
-            badge.addView(iconView("lock", fg, 40), new FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER));
-            box.addView(badge, new LinearLayout.LayoutParams(dp(92), dp(92)));
-            TextView name = text(getString(R.string.app_name), 22, fg, true);
-            name.setPadding(0, dp(20), 0, dp(28));
-            box.addView(name);
-            JSONObject o = f("appLock");
-            TextView unlock = pillButton(o != null ? o.optString("title", "Unlock") : "Unlock", fg, theme);
+            disc.setColor((fg & 0x00FFFFFF) | 0x1F000000);
+            disc.setStroke(dp(1), (fg & 0x00FFFFFF) | 0x40000000);
+            fp.setBackground(ripple(disc, fg, false));
+            fp.addView(iconView("fingerprint", fg, 40), new FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER));
+            fp.setContentDescription(title);
+            fp.setClickable(true);
+            fp.setOnClickListener(v -> authenticate());
+            LinearLayout.LayoutParams fpl = new LinearLayout.LayoutParams(dp(84), dp(84));
+            fpl.topMargin = dp(56);
+            box.addView(fp, fpl);
+
+            TextView unlock = pillButton(title, fg, light ? Color.WHITE : bottom);
+            unlock.setMinWidth(dp(220));
             unlock.setOnClickListener(v -> authenticate());
-            box.addView(unlock);
-            lockView.addView(box, matchParent());
+            LinearLayout.LayoutParams ul = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            ul.topMargin = dp(28);
+            box.addView(unlock, ul);
+
+            lockView.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
             int at = splash != null ? stage.indexOfChild(splash) : -1;
             if (at < 0) stage.addView(lockView, matchParent());
             else stage.addView(lockView, at, matchParent());
+
+            // A calm entrance: the logo settles, the rest fades up after it.
+            logo.setScaleX(0.8f);
+            logo.setScaleY(0.8f);
+            logo.setAlpha(0f);
+            logo.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(480).setInterpolator(new OvershootInterpolator(1.4f)).start();
+            for (int i = 1; i < box.getChildCount(); i++) {
+                View c = box.getChildAt(i);
+                c.setAlpha(0f);
+                c.setTranslationY(dp(12));
+                c.animate().alpha(1f).translationY(0).setStartDelay(120 + i * 50L).setDuration(380)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+            }
         }
         lockView.setAlpha(1f);
         lockView.setVisibility(View.VISIBLE);
@@ -2746,6 +2852,7 @@ public class MainActivity extends Activity {
         JSONObject haptics = f("haptics");
         if (haptics != null && haptics.optBoolean("page", false)) web.addJavascriptInterface(new TapBridge(), "__w2aTap");
         if (f("notifyBridge") != null) web.addJavascriptInterface(new NotifyBridge(), "Web2AppNotify");
+        if (f("speech") != null) web.addJavascriptInterface(new SpeechBridge(), "Web2AppSpeech");
         if (f("offlineCache") != null) {
             ConnectivityManager cmgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
             if (cmgr != null && cmgr.getActiveNetwork() == null) {
@@ -2866,6 +2973,7 @@ public class MainActivity extends Activity {
 
     private void inject() {
         if (swipe != null) web.evaluateJavascript(PULL_JS, null);
+        if (!pageJs.isEmpty()) web.evaluateJavascript(pageJs, null);
         if (f("desktopMode") != null) {
             web.evaluateJavascript("(function(){var m=document.querySelector('meta[name=viewport]');"
                     + "if(!m){m=document.createElement('meta');m.name='viewport';"
@@ -2887,6 +2995,11 @@ public class MainActivity extends Activity {
             String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase(Locale.ROOT);
             if (scheme.equals("http") || scheme.equals("https")) {
                 if (isBlocked(u)) return true;
+                JSONObject stay = f("stayInApp");
+                if (stay != null && request.isForMainFrame() && !isInternal(u)) {
+                    showSnack(stay.optString("message", "This link cannot be opened here."));
+                    return true;
+                }
                 if (cfg.optBoolean("externalLinksInBrowser", true) && request.isForMainFrame() && !isInternal(u)) {
                     if (f("inAppBrowser") != null) openInApp(u);
                     else openExternal(u);
@@ -2930,6 +3043,7 @@ public class MainActivity extends Activity {
 
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            if (LOCAL_HOST.equals(request.getUrl().getHost())) return localFile(request.getUrl());
             if (!blockedHosts.isEmpty() && isBlocked(request.getUrl())) {
                 return new WebResourceResponse("text/plain", "utf-8", 403, "Blocked", null,
                         new ByteArrayInputStream(new byte[0]));
@@ -2941,6 +3055,11 @@ public class MainActivity extends Activity {
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             loadFailed = false;
             currentUrl = url == null ? "" : url;
+            if (httpErrorUrl == null || !httpErrorUrl.equals(url)) {
+                httpErrorUrl = null;
+                hideErrorPage();
+            }
+            applyDataSaver();
             if (progress.getParent() != null) progress.setVisibility(View.VISIBLE);
             if (spinner != null && (swipe == null || !swipe.isRefreshing())) spinner.setVisibility(View.VISIBLE);
             updateNavFor(url);
@@ -2970,6 +3089,9 @@ public class MainActivity extends Activity {
         @Override
         public void onPageFinished(WebView view, String url) {
             currentUrl = url == null ? "" : url;
+            if (httpErrorUrl != null && httpErrorUrl.equals(url)) showErrorPage(url);
+            else hideErrorPage();
+            httpErrorUrl = null;
             progress.setVisibility(View.GONE);
             if (spinner != null) spinner.setVisibility(View.GONE);
             if (swipe != null) swipe.setRefreshing(false);
@@ -3000,6 +3122,14 @@ public class MainActivity extends Activity {
                 maybeAskRating();
             }
             if (!loadFailed) Ads.onPageLoaded(MainActivity.this);
+        }
+
+        @Override
+        public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
+            JSONObject o = f("errorPage");
+            if (o == null || !request.isForMainFrame()) return;
+            int code = response.getStatusCode();
+            if (code >= 500 || (code == 404 && o.optBoolean("notFound", false))) httpErrorUrl = request.getUrl().toString();
         }
 
         @Override
@@ -3071,6 +3201,10 @@ public class MainActivity extends Activity {
             }
             customView = view;
             customViewCallback = callback;
+            if (f("videoRotate") != null) {
+                orientationBeforeVideo = getRequestedOrientation();
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            }
             fullscreenHolder.addView(view, matchParent());
             fullscreenHolder.setVisibility(View.VISIBLE);
             applyImmersive(true);
@@ -3090,6 +3224,178 @@ public class MainActivity extends Activity {
         if (customViewCallback != null) customViewCallback.onCustomViewHidden();
         customViewCallback = null;
         if (!cfg.optBoolean("fullscreen", false)) applyImmersive(false);
+        if (orientationBeforeVideo != null) {
+            setRequestedOrientation(orientationBeforeVideo);
+            orientationBeforeVideo = null;
+        }
+    }
+
+    // ------------------------------------------------- files inside the app
+    private static final String[][] MIME = {
+            {"html", "text/html"}, {"htm", "text/html"}, {"css", "text/css"}, {"js", "text/javascript"},
+            {"mjs", "text/javascript"}, {"json", "application/json"}, {"svg", "image/svg+xml"}, {"png", "image/png"},
+            {"jpg", "image/jpeg"}, {"jpeg", "image/jpeg"}, {"gif", "image/gif"}, {"webp", "image/webp"},
+            {"avif", "image/avif"}, {"ico", "image/x-icon"}, {"woff", "font/woff"}, {"woff2", "font/woff2"},
+            {"ttf", "font/ttf"}, {"otf", "font/otf"}, {"mp4", "video/mp4"}, {"webm", "video/webm"},
+            {"mp3", "audio/mpeg"}, {"wav", "audio/wav"}, {"ogg", "audio/ogg"}, {"txt", "text/plain"},
+            {"xml", "application/xml"}, {"pdf", "application/pdf"}, {"wasm", "application/wasm"},
+            {"webmanifest", "application/manifest+json"},
+    };
+
+    private static String mimeOf(String path) {
+        int dot = path.lastIndexOf('.');
+        String ext = dot < 0 ? "" : path.substring(dot + 1).toLowerCase(Locale.ROOT);
+        for (String[] m : MIME) if (m[0].equals(ext)) return m[1];
+        String guess = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+        return guess != null ? guess : "application/octet-stream";
+    }
+
+    /** Serves the app's own site (uploaded HTML or ZIP) from assets/www, like a web server would. */
+    private WebResourceResponse localFile(Uri u) {
+        String p = u.getPath() == null ? "/" : u.getPath();
+        if (p.endsWith("/")) p += "index.html";
+        p = p.replaceFirst("^/+", "");
+        java.util.Map<String, String> headers = new java.util.HashMap<>();
+        headers.put("Cache-Control", "no-cache");
+        if (!p.contains("..")) {
+            for (String candidate : new String[]{p, p + "/index.html", p + ".html"}) {
+                try {
+                    InputStream in = getAssets().open("www/" + candidate);
+                    String mime = mimeOf(candidate);
+                    boolean text = mime.startsWith("text/") || mime.endsWith("json") || mime.endsWith("javascript")
+                            || mime.endsWith("xml") || mime.endsWith("svg+xml");
+                    return new WebResourceResponse(mime, text ? "utf-8" : null, 200, "OK", headers, in);
+                } catch (java.io.IOException ignored) {
+                    // try the next form
+                }
+            }
+        }
+        return new WebResourceResponse("text/html", "utf-8", 404, "Not Found", headers,
+                new ByteArrayInputStream("<h1 style=\"font-family:sans-serif\">Page not found</h1>".getBytes()));
+    }
+
+    // ---------------------------------------------------- data saver
+    private void applyDataSaver() {
+        if (f("dataSaver") == null || web == null) return;
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        boolean metered = cm != null && cm.isActiveNetworkMetered();
+        web.getSettings().setBlockNetworkImage(metered);
+    }
+
+    // ---------------------------------------------------- friendly error page
+    private void showErrorPage(final String url) {
+        JSONObject o = f("errorPage");
+        if (o == null) return;
+        if (errorView == null) {
+            int fg = night ? 0xFFE8EAED : 0xFF22262B;
+            errorView = new LinearLayout(this);
+            errorView.setOrientation(LinearLayout.VERTICAL);
+            errorView.setGravity(Gravity.CENTER);
+            errorView.setBackgroundColor(pageBg);
+            errorView.setPadding(dp(32), dp(32), dp(32), dp(32));
+            errorView.setClickable(true);
+            FrameLayout badge = new FrameLayout(this);
+            GradientDrawable disc = new GradientDrawable();
+            disc.setShape(GradientDrawable.OVAL);
+            disc.setColor((theme & 0x00FFFFFF) | 0x1F000000);
+            badge.setBackground(disc);
+            badge.addView(iconView("info", Config.isLight(theme) ? 0xFF3C4148 : theme, 40),
+                    new FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER));
+            errorView.addView(badge, new LinearLayout.LayoutParams(dp(96), dp(96)));
+            TextView t = text(o.optString("title", "Something went wrong"), 20, fg, true);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(0, dp(22), 0, dp(8));
+            errorView.addView(t);
+            TextView m = text(o.optString("message", "We could not load this page. Please try again in a moment."), 15,
+                    (fg & 0x00FFFFFF) | 0xB3000000, false);
+            m.setGravity(Gravity.CENTER);
+            m.setLineSpacing(0, 1.2f);
+            errorView.addView(m);
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER);
+            TextView home = pillButton("Home", (theme & 0x00FFFFFF) | 0x1F000000, Config.isLight(theme) ? 0xFF22262B : theme);
+            TextView again = pillButton("Try again", theme, Config.onColor(theme));
+            LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            bl.setMargins(dp(6), 0, dp(6), 0);
+            row.addView(home, bl);
+            row.addView(again, bl);
+            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            rl.topMargin = dp(26);
+            errorView.addView(row, rl);
+            home.setOnClickListener(v -> web.loadUrl(homeUrl));
+            again.setOnClickListener(v -> {
+                Object tag = errorView.getTag();
+                web.loadUrl(tag != null ? tag.toString() : homeUrl);
+            });
+            content.addView(errorView, matchParent());
+        }
+        errorView.setTag(url);
+        errorView.bringToFront();
+        errorView.setVisibility(View.VISIBLE);
+        errorView.setAlpha(0f);
+        errorView.animate().alpha(1f).setDuration(220).start();
+    }
+
+    private void hideErrorPage() {
+        if (errorView != null) errorView.setVisibility(View.GONE);
+    }
+
+    // ---------------------------------------------------------- read aloud
+    private void say(String text, String lang) {
+        if (text == null || text.trim().isEmpty()) return;
+        if (text.length() > 3900) text = text.substring(0, 3900);
+        if (tts == null || !ttsReady) {
+            pendingSpeech = text;
+            pendingLang = lang;
+            if (tts == null) {
+                tts = new TextToSpeech(this, status -> ui.post(() -> {
+                    ttsReady = status == TextToSpeech.SUCCESS;
+                    if (ttsReady && pendingSpeech != null) {
+                        String t = pendingSpeech;
+                        pendingSpeech = null;
+                        say(t, pendingLang);
+                    }
+                }));
+            }
+            return;
+        }
+        if (lang != null && !lang.trim().isEmpty()) tts.setLanguage(Locale.forLanguageTag(lang.trim()));
+        JSONObject o = f("speech");
+        tts.setSpeechRate(o != null ? o.optInt("rate", 100) / 100f : 1f);
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "w2a");
+    }
+
+    /** window.Web2AppSpeech: the page speaks text with the phone's voice. Only the app's own site may use it. */
+    private class SpeechBridge {
+        private boolean trusted() {
+            String u = currentUrl;
+            return u != null && !u.isEmpty() && isInternal(Uri.parse(u));
+        }
+
+        @JavascriptInterface
+        public void speak(String text, String lang) {
+            if (trusted()) ui.post(() -> say(text, lang));
+        }
+
+        @JavascriptInterface
+        public void speak(String text) {
+            speak(text, null);
+        }
+
+        @JavascriptInterface
+        public void stop() {
+            ui.post(() -> {
+                pendingSpeech = null;
+                if (tts != null) tts.stop();
+            });
+        }
+
+        @JavascriptInterface
+        public boolean isSpeaking() {
+            return tts != null && tts.isSpeaking();
+        }
     }
 
     // --------------------------------------------------- JavaScript bridge
@@ -3475,6 +3781,7 @@ public class MainActivity extends Activity {
         // Background audio: the page keeps running (and playing) while the app is not on screen.
         if (f("backgroundAudio") == null) web.onPause();
         stopShake();
+        pausedAt = SystemClock.elapsedRealtime();
         ui.removeCallbacks(idleCheck);
         CookieManager.getInstance().flush();
         if (f("rememberPage") != null) {
@@ -3490,6 +3797,13 @@ public class MainActivity extends Activity {
         super.onResume();
         web.onResume();
         hidePrivacyCover();
+        applyDataSaver();
+        JSONObject fresh = f("resumeReload");
+        if (fresh != null && pausedAt > 0 && customView == null
+                && SystemClock.elapsedRealtime() - pausedAt >= fresh.optInt("minutes", 30) * 60000L) {
+            web.reload();
+        }
+        pausedAt = 0;
         startShake();
         if (f("idleReset") != null) {
             lastTouch = SystemClock.uptimeMillis();
@@ -3541,6 +3855,7 @@ public class MainActivity extends Activity {
             }
         }
         ui.removeCallbacksAndMessages(null);
+        if (tts != null) tts.shutdown();
         if (sheetWeb != null) sheetWeb.destroy();
         if (web != null) {
             ViewGroup parent = (ViewGroup) web.getParent();

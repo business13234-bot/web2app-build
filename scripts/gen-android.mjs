@@ -4,7 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PERMISSIONS } from '../shared/catalog.mjs';
-import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, xml, splashMedia } from './lib.mjs';
+import { pageScript } from '../shared/inject.mjs';
+import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, xml, splashMedia, siteFiles } from './lib.mjs';
 
 const [payloadFile, outDir] = process.argv.slice(2);
 if (!payloadFile || !outDir) {
@@ -144,6 +145,9 @@ ${featureXml}
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <application
@@ -213,12 +217,20 @@ const media = splashMedia(payload);
 if (media && media.kind === 'image') write(path.join(main, 'res', 'drawable-nodpi', `w2a_splash_bg.${media.ext}`), media.buf);
 if (media && media.kind === 'video') write(path.join(main, 'res', 'raw', 'w2a_splash.mp4'), media.buf);
 
+// Apps made from uploaded files: the site goes into the app and is served from there (no internet needed).
+const site = siteFiles(payload);
+if (site) {
+  for (const file of site) write(path.join(main, 'assets', 'www', ...file.path.split('/')), file.buf);
+  console.log(`Site files: ${site.length}`);
+}
+
 if (on('darkMode')) {
   // Dark theme when the phone is in dark mode; web pages then see prefers-color-scheme: dark.
   write(path.join(main, 'res', 'values-night', 'styles.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:forceDarkAllowed">false</item>
         <item name="android:colorAccent">@color/theme</item>
         <item name="android:statusBarColor">@color/theme</item>
         <item name="android:navigationBarColor">@color/theme</item>
@@ -238,6 +250,7 @@ function v31Styles(parent) {
     <style name="AppTheme" parent="${parent}">
         <item name="android:windowBackground">@color/splash_bg</item>
         <item name="android:windowSplashScreenBackground">@color/splash_bg</item>${blankIcon}
+        <item name="android:forceDarkAllowed">false</item>
         <item name="android:colorAccent">@color/theme</item>
         <item name="android:statusBarColor">@color/theme</item>
         <item name="android:navigationBarColor">@color/theme</item>
@@ -249,7 +262,7 @@ write(path.join(main, 'res', 'values-v31', 'styles.xml'), v31Styles('android:The
 if (on('darkMode')) write(path.join(main, 'res', 'values-night-v31', 'styles.xml'), v31Styles('android:Theme.Material.NoActionBar'));
 
 // ---- runtime config read by MainActivity ----
-const appConfig = { ...cfg, androidRuntimePermissions: runtime };
+const appConfig = { ...cfg, androidRuntimePermissions: runtime, pageJs: pageScript(cfg) };
 delete appConfig.iosPurpose;
 if (appConfig.features && appConfig.features.push) {
   // The Firebase file is compiled in by the Google Services plugin; the app does not need a copy.

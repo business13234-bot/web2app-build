@@ -60,6 +60,7 @@ extension WebViewController {
             ])
         }
         if let notice = cfg.feature("noticeBar") { loadNotice(notice) }
+        startDataSaver()
         if ProcessInfo.processInfo.arguments.contains("-w2aSelfTest") {
             Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.updateSelfTestLabel() }
         }
@@ -79,11 +80,13 @@ extension WebViewController {
 
     func featuresBecameActive() {
         if brightOn { applyBrightness(true) }
+        reloadIfAwayLong()
         hidePrivacyCover()
         lastTouch = Date()
     }
 
     func featuresEnteredBackground() {
+        backgroundedAt = Date()
         if cfg.feature("privacyCover") != nil { showPrivacyCover() }
     }
 

@@ -3,6 +3,7 @@
 // Pages show a status line (#status) that the tests read: what the app changed in the page.
 import http from 'node:http';
 import { execFile } from 'node:child_process';
+import zlib from 'node:zlib';
 
 const port = Number(process.argv[2] || 8090);
 const tracker = process.env.TRACKER_HOST || '10-0-2-2.nip.io';
@@ -19,6 +20,28 @@ function tone() {
   return b;
 }
 const toneWav = tone();
+
+// A 600x400 PNG with a colour gradient and a grid, so the image viewer has something real to open and zoom.
+function bigPng() {
+  const w = 600, h = 400;
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 3 + 1)] = 0;
+    for (let x = 0; x < w; x++) {
+      const o = y * (w * 3 + 1) + 1 + x * 3;
+      const grid = x % 50 === 0 || y % 50 === 0;
+      raw[o] = grid ? 255 : Math.round(40 + 200 * x / w);
+      raw[o + 1] = grid ? 255 : Math.round(60 + 120 * y / h);
+      raw[o + 2] = grid ? 255 : 200;
+    }
+  }
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b) => { let c = 0xffffffff; for (const v of b) c = crcTable[(c ^ v) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+const big = bigPng();
 
 const probeScript = `<script>
 setTimeout(function(){
@@ -71,6 +94,7 @@ const pages = {
     <a id="l-img" href="/img">Image page</a>
     <a id="l-audio" href="/audio">Audio page</a>
     <a id="l-notify" href="/notify">Notify page</a>
+    <a id="l-feat" href="/feat">Feature page</a>
     <p id="findme">Needle one, needle two, needle three.</p>`],
   '/privacy': ['Privacy policy', '<p id="policy">This is the test privacy policy.</p>'],
   '/themed': ['Themed page', '<p>Pink theme colour</p>', '<meta name="theme-color" content="#C2185B">'],
@@ -82,6 +106,17 @@ const pages = {
   '/cart': ['Cart page', '<a href="/">Home</a>'],
   '/me': ['Me page', '<a href="/">Home</a>'],
   '/page2': ['Page two', '<a href="/">Home</a>'],
+  '/feat': ['Feature page', `<button id="b-speak" onclick="window.Web2AppSpeech&&Web2AppSpeech.speak('Hello from the app','en-US')">Speak</button>
+    <button id="b-fs" onclick="document.getElementById('fsbox').requestFullscreen()">Fullscreen</button>
+    <div id="fsbox" style="background:#333;color:#fff;height:120px">Fullscreen box</div>
+    <a id="l-500" href="/err500">Server error</a><a id="l-404" href="/missing-page">Missing page</a>
+    <a id="l-ext2" href="https://example.org/">External site</a>
+    <img id="bigpic" src="/big.png" style="width:100%;height:auto" alt="big photo">
+    <div id="fstatus">feat pending</div>
+    <div id="sp">speaking=false</div>
+    <script>setTimeout(function(){var p=document.getElementById('probe');
+    document.getElementById('fstatus').textContent='font='+getComputedStyle(p).fontFamily.split(',')[0]+' bar='+(!!document.getElementById('w2a-progress'))+' speech='+(typeof window.Web2AppSpeech)+' loaded='+performance.timeOrigin;},2500);</script>
+    <script>setInterval(function(){document.getElementById('sp').textContent='speaking='+!!(window.Web2AppSpeech&&Web2AppSpeech.isSpeaking());},300);</script>`],
   '/ticket/42': ['Ticket 42', '<p>Show this at the door</p>', '<meta name="theme-color" content="#1B5E20">'],
 };
 
@@ -123,6 +158,10 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': toneWav.length });
     return res.end(toneWav);
   }
+  if (url.pathname === '/big.png') {
+    res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
+    return res.end(big);
+  }
   if (url.pathname === '/photo.png') {
     res.writeHead(200, { 'content-type': 'image/gif', 'cache-control': 'max-age=3600' });
     return res.end(Buffer.from('R0lGODlhAQABAIAAAP8AAAAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
@@ -147,6 +186,7 @@ http.createServer((req, res) => {
     return setTimeout(() => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(page('Slow page', '')); }, 4000);
   }
   const p = pages[url.pathname];
+  if (url.pathname === '/err500') { res.writeHead(500, { 'content-type': 'text/html' }); return res.end('<h1>500 raw server error</h1>'); }
   if (!p) { res.writeHead(404); return res.end('not found'); }
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
   res.end(page(p[0], p[1], p[2]));

@@ -90,6 +90,15 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     var savedBrightness: CGFloat = -1
     var pagesShown = 0
 
+    // Features added in 1.4
+    var errorOverlay: UIView?
+    var httpErrorURL: URL?
+    var speaker: AVSpeechSynthesizer?
+    var dataSaverRules: WKContentRuleList?
+    var dataSaverMonitor: NWPathMonitor?
+    var dataSaverActive = false
+    var backgroundedAt: Date?
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -109,6 +118,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         if cfg.feature("desktopMode") != nil {
             configuration.defaultWebpagePreferences.preferredContentMode = .desktop
         }
+        if cfg.isLocal { configuration.setURLSchemeHandler(LocalFiles(), forURLScheme: AppConfig.localScheme) }
         addUserScripts(configuration.userContentController)
 
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -343,6 +353,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             add("try{\n\(js)\n}catch(e){console.error(e)}", .atDocumentEnd)
         }
         addFeatureScripts(ucc)
+        addPageFeatures(ucc)
         if let bridge = cfg.feature("jsBridge") {
             bridgeName = bridge.str("name", "Web2App")
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -361,6 +372,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "w2aTap" {
             tick()
+            return
+        }
+        if message.name == "w2aSpeech" {
+            handleSpeech(message)
             return
         }
         // Only pages of your own website may use the bridge.
@@ -938,6 +953,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             image.widthAnchor.constraint(equalToConstant: 112).isActive = true
             image.heightAnchor.constraint(equalToConstant: 112).isActive = true
             stack.addArrangedSubview(image)
+            animateSplashLogo(image, options.str("animation", "pop"))
         }
         if style == "name" || style == "logo_name" {
             let name = UILabel()
@@ -945,6 +961,14 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             name.font = .systemFont(ofSize: 24, weight: .bold)
             name.textColor = options.color("textColor") ?? bg.onColor
             stack.addArrangedSubview(name)
+            if options.str("animation", "pop") != "none" {
+                name.alpha = 0
+                name.transform = CGAffineTransform(translationX: 0, y: 10)
+                UIView.animate(withDuration: 0.46, delay: 0.22, options: .curveEaseOut) {
+                    name.alpha = 1
+                    name.transform = .identity
+                }
+            }
         }
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
@@ -1201,48 +1225,18 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     private func buildLock() {
         guard cfg.feature("appLock") != nil else { return }
-        let overlay = UIView()
-        overlay.backgroundColor = theme
-        overlay.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(overlay)
+        let built = makeLockScreen()
+        view.addSubview(built.view)
         NSLayoutConstraint.activate([
-            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            overlay.topAnchor.constraint(equalTo: view.topAnchor),
-            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            built.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            built.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            built.view.topAnchor.constraint(equalTo: view.topAnchor),
+            built.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        let fg = theme.onColor
-        let icon = UIImageView(image: symbol("lock.fill", 44, .regular))
-        icon.tintColor = fg
-        let name = UILabel()
-        name.text = cfg.appName
-        name.font = .systemFont(ofSize: 22, weight: .bold)
-        name.textColor = fg
-        let button = UIButton(type: .system)
-        button.setTitle(cfg.feature("appLock")?.str("title", "Unlock") ?? "Unlock", for: .normal)
-        button.setImage(symbol("faceid", 18), for: .normal)
-        button.tintColor = theme
-        button.backgroundColor = fg
-        button.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
-        button.layer.cornerRadius = 25
-        button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 26, bottom: 0, right: 30)
-        button.imageEdgeInsets = UIEdgeInsets(top: 0, left: -6, bottom: 0, right: 6)
-        button.heightAnchor.constraint(equalToConstant: 50).isActive = true
-        button.addTarget(self, action: #selector(unlock), for: .touchUpInside)
-        let stack = UIStackView(arrangedSubviews: [icon, name, button])
-        stack.axis = .vertical
-        stack.alignment = .center
-        stack.spacing = 20
-        stack.setCustomSpacing(40, after: name)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        overlay.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
-        ])
-        overlay.accessibilityViewIsModal = true
-        lockView = overlay
-        lockButton = button
+        built.fingerprint.addTarget(self, action: #selector(unlock), for: .touchUpInside)
+        built.button.addTarget(self, action: #selector(unlock), for: .touchUpInside)
+        lockView = built.view
+        lockButton = built.button
     }
 
     @objc private func unlock() {
@@ -1404,8 +1398,18 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         }
         let scheme = (url.scheme ?? "").lowercased()
 
+        if scheme == AppConfig.localScheme {
+            decisionHandler(.allow)
+            return
+        }
+
         if scheme == "http" || scheme == "https" {
             let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            if let stay = cfg.feature("stayInApp"), mainFrame, !isInternal(url) {
+                showSnack(stay.str("message", "This link cannot be opened here."))
+                decisionHandler(.cancel)
+                return
+            }
             if cfg.bool("externalLinksInBrowser", true), mainFrame,
                navigationAction.navigationType == .linkActivated, !isInternal(url) {
                 openOutside(url)
@@ -1446,6 +1450,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        noteHttpStatus(navigationResponse)
         if !navigationResponse.canShowMIMEType, cfg.bool("downloads", true),
            let url = navigationResponse.response.url {
             // Files the web view cannot display are handed to Safari to download.
@@ -1458,6 +1463,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         spinner?.startAnimating()
+        errorPageNavigationStarted(webView.url)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -1467,6 +1473,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         offlineView.isHidden = true
+        errorPageNavigationFinished(webView.url)
         webView.scrollView.refreshControl?.endRefreshing()
         spinner?.stopAnimating()
         updateNav(for: webView.url)
