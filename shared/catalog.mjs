@@ -194,6 +194,8 @@ export function validateConfig(input) {
   if (!feat.ok) return fail(feat.error);
   // The splash screen's own colour is the launch colour; without it, the colour sent (or white).
   if (feat.features.splash && HEX.test(feat.features.splash.color || '')) splashColor = feat.features.splash.color;
+  // Without a splash screen the app opens on plain white, like a browser: no colour, no logo.
+  if (!feat.features.splash) splashColor = '#FFFFFF';
 
   return {
     ok: true,

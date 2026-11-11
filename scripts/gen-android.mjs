@@ -224,12 +224,34 @@ if (site) {
   console.log(`Site files: ${site.length}`);
 }
 
+// The window behind the first page: the logo on the splash colour only when the splash screen is on.
+// Off, the app opens on a plain page colour, like a browser.
+const launchBg = on('splash') ? '@drawable/splash' : '@color/splash_bg';
+write(path.join(main, 'res', 'values', 'styles.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">${launchBg}</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:colorAccent">@color/theme</item>
+        <item name="android:statusBarColor">@color/theme</item>
+        <item name="android:navigationBarColor">@color/theme</item>
+    </style>
+</resources>
+`);
+
 if (on('darkMode')) {
   // Dark theme when the phone is in dark mode; web pages then see prefers-color-scheme: dark.
+  if (!on('splash')) {
+    write(path.join(main, 'res', 'values-night', 'colors.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="splash_bg">#121212</color>
+</resources>
+`);
+  }
   write(path.join(main, 'res', 'values-night', 'styles.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:windowBackground">${launchBg}</item>
         <item name="android:forceDarkAllowed">false</item>
         <item name="android:colorAccent">@color/theme</item>
         <item name="android:statusBarColor">@color/theme</item>
@@ -239,12 +261,12 @@ if (on('darkMode')) {
 `);
 }
 
-// Android 12+ system launch screen. With our own splash screen on, the system one shows only the
-// splash colour (no icon), so the app goes straight from the colour into the animated splash.
+// Android 12+ always shows a system launch screen. It shows only a plain colour (no icon): with our
+// splash on, the app goes straight from the colour into it; with it off, straight into the page.
 function v31Styles(parent) {
-  const blankIcon = on('splash') ? `
+  const blankIcon = `
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/w2a_blank</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_bg</item>` : '';
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_bg</item>`;
   return `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="${parent}">

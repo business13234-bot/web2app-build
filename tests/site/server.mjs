@@ -81,6 +81,13 @@ ${probeScript}
 </body></html>`;
 
 const pages = {
+  // Login pages for saved passwords: a classic form, and a script sign-in that never sends the form.
+  '/login': ['Login form', `<form method="post" action="/welcome"><input id="lu" name="email" type="email" autocomplete="username" placeholder="Email">
+    <input id="lp" name="password" type="password" autocomplete="current-password" placeholder="Password"><button id="lb">Sign in</button></form>`],
+  '/spa-login': ['Script login', `<div id="box"><input id="su" type="text" placeholder="Email or phone">
+    <input id="sp2" type="password" placeholder="Password"><div id="sb" role="button" tabindex="0">Log in</div></div>
+    <script>document.getElementById('sb').onclick=function(){setTimeout(function(){document.getElementById('box').innerHTML='<p id="done">Signed in</p>';},300);};</script>`],
+  '/welcome': ['Welcome', '<p id="done">Signed in</p>'],
   '/': ['Home', `<a id="l-search" href="/search">Search</a><a id="l-cart" href="/cart">Cart</a>
     <button id="b-toast" onclick="window.Web2App&&Web2App.toast('Bridge toast works')">Show toast</button>
     <a id="l-ext" href="https://example.org/">External site</a>

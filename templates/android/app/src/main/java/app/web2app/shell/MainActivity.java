@@ -444,6 +444,9 @@ public class MainActivity extends Activity {
 
         web = new WebView(this);
         web.setBackgroundColor(pageBg);
+        // Password managers (Google, Samsung Pass, 1Password ...) can fill and save logins in the page.
+        if (Build.VERSION.SDK_INT >= 26) web.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
+        web.addJavascriptInterface(new LoginBridge(), "__w2aLogin");
         if (cfg.optBoolean("pullToRefresh", true)) {
             swipe = new SwipeRefreshLayout(this);
             swipe.setColorSchemeColors(loaderColor());
@@ -2972,6 +2975,7 @@ public class MainActivity extends Activity {
     }
 
     private void inject() {
+        web.evaluateJavascript(LOGIN_JS, null);
         if (swipe != null) web.evaluateJavascript(PULL_JS, null);
         if (!pageJs.isEmpty()) web.evaluateJavascript(pageJs, null);
         if (f("desktopMode") != null) {
@@ -3368,6 +3372,41 @@ public class MainActivity extends Activity {
     }
 
     /** window.Web2AppSpeech: the page speaks text with the phone's voice. Only the app's own site may use it. */
+    // ------------------------------------------------------- saved passwords
+    // Chrome offers to save a password when a login form is sent. Many sites sign in with a script
+    // instead of sending the form, so the page tells us when a filled-in password is being sent,
+    // and the phone's password manager then offers to save it (and fills it in next time).
+
+    private static final String LOGIN_JS = "(function(){if(window.__w2aLoginHook)return;window.__w2aLoginHook=1;"
+            + "var sent='';"
+            + "function pw(){var l=document.querySelectorAll('input[type=password]');"
+            + "for(var i=0;i<l.length;i++){if(l[i].value)return l[i];}return null;}"
+            + "function save(){var p=pw();if(!p||sent===p.value)return;sent=p.value;"
+            + "try{window.__w2aLogin.submitted();}catch(e){}}"
+            + "function sendy(b){if(!b)return false;var t=((b.type||'')+'').toLowerCase();"
+            + "var label=((b.innerText||b.value||'')+' '+(b.getAttribute('aria-label')||'')).toLowerCase();"
+            + "if(/show|hide|eye|visib|forgot|cancel/.test(label))return false;"
+            + "if(t==='submit')return true;if(b.tagName==='BUTTON'&&!b.getAttribute('type')&&b.form)return true;"
+            + "return /log ?in|sign ?in|sign ?up|register|continue|next|submit|enter|create|join|\u09b2\u0997/.test(label);}"
+            + "document.addEventListener('submit',save,true);"
+            + "document.addEventListener('click',function(e){var b=e.target&&e.target.closest"
+            + "&&e.target.closest('button,input[type=submit],input[type=button],[role=button],a');"
+            + "if(sendy(b))save();},true);"
+            + "document.addEventListener('keydown',function(e){var t=e.target;"
+            + "if(e.key==='Enter'&&t&&t.tagName==='INPUT'&&t.form)save();},true);"
+            + "window.addEventListener('pagehide',save);})();";
+
+    private class LoginBridge {
+        @JavascriptInterface
+        public void submitted() {
+            ui.post(() -> {
+                if (Build.VERSION.SDK_INT < 26) return;
+                android.view.autofill.AutofillManager am = getSystemService(android.view.autofill.AutofillManager.class);
+                if (am != null && am.isEnabled()) am.commit();
+            });
+        }
+    }
+
     private class SpeechBridge {
         private boolean trusted() {
             String u = currentUrl;
