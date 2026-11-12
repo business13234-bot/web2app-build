@@ -6,6 +6,17 @@ import { validateConfig } from '../shared/catalog.mjs';
 import { checkZipSite, checkHtmlFile, MAX_SITE_BYTES } from '../shared/site.mjs';
 
 /** Reads the build request and re-validates the config (the scripts never trust raw input). */
+/** The free-plan watermark as the app reads it (null: none, e.g. local test builds). */
+export function watermarkConfig(payload) {
+  const w = payload.watermark;
+  if (!w || typeof w.api !== 'string' || !/^https?:\/\/[^\s"]+\/api\/wm\/[A-Za-z0-9]{32}$/.test(w.api)) return null;
+  return {
+    text: String(w.text || 'Built with Web2App').slice(0, 60),
+    api: w.api,
+    until: Math.max(0, Number(w.until) || 0),
+  };
+}
+
 export function readPayload(file) {
   const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
   const checked = validateConfig(payload.config);

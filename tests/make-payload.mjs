@@ -147,5 +147,7 @@ if (r.error) {
 }
 const payload = { id: 'test' + variant, platforms: ['android', 'ios'], config: r.config, icons: base.icons };
 if (source) payload.source = source;
+// Free-plan watermark: variant a has no plan (the mark shows), the others have one (it stays hidden).
+payload.watermark = { text: 'Built with Web2App', api: `${site}api/wm/${(variant === 'a' ? 'F' : 'P').repeat(32)}`, until: 0 };
 fs.writeFileSync(out, JSON.stringify(payload));
 console.log('ok', Object.keys(r.config.features).join(','));

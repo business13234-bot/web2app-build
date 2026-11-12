@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PERMISSIONS } from '../shared/catalog.mjs';
 import { pageScript } from '../shared/inject.mjs';
-import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, xml, splashMedia, siteFiles } from './lib.mjs';
+import { watermarkConfig, readPayload, copyDir, write, writeImage, writeBinary, setEnv, xml, splashMedia, siteFiles } from './lib.mjs';
 
 const [payloadFile, outDir] = process.argv.slice(2);
 if (!payloadFile || !outDir) {
@@ -290,7 +290,7 @@ write(path.join(main, 'res', 'values-v31', 'styles.xml'), v31Styles('android:The
 if (on('darkMode')) write(path.join(main, 'res', 'values-night-v31', 'styles.xml'), v31Styles('android:Theme.Material.NoActionBar'));
 
 // ---- runtime config read by MainActivity ----
-const appConfig = { ...cfg, androidRuntimePermissions: runtime, pageJs: pageScript(cfg) };
+const appConfig = { ...cfg, androidRuntimePermissions: runtime, pageJs: pageScript(cfg), watermark: watermarkConfig(payload) };
 delete appConfig.iosPurpose;
 if (appConfig.features && appConfig.features.push) {
   // The Firebase file is compiled in by the Google Services plugin; the app does not need a copy.

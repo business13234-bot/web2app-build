@@ -153,6 +153,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         buildLock()
         buildSplash()
         startFeatures()
+        setupWatermark()
 
         if cfg.bool("keepScreenOn", false) {
             UIApplication.shared.isIdleTimerDisabled = true
@@ -1302,7 +1303,104 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         }
     }
 
+    // MARK: free-plan watermark
+
+    private var watermarkLabel: UILabel?
+    private var watermarkChecked = Date.distantPast
+    private var watermarkTimer: Timer?
+
+    /// "Built with Web2App" faintly across the middle of the screen while the app's owner has no
+    /// plan. The build knows the plan end at that time; the server is asked on every start (and on
+    /// return after an hour) and its answer is kept, so a bought plan removes the mark and an ended
+    /// plan brings it back, also offline. Touches go through it to the page.
+    private func setupWatermark() {
+        guard let w = cfg.object("watermark") else { return }
+        let label = UILabel()
+        label.text = UserDefaults.standard.string(forKey: "w2a.wmText") ?? (w["text"] as? String) ?? "Built with Web2App"
+        label.textColor = UIColor(white: 0.5, alpha: 0.24)
+        label.textAlignment = .center
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.4
+        label.isUserInteractionEnabled = false
+        label.isAccessibilityElement = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            label.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 1.0),
+        ])
+        label.transform = CGAffineTransform(rotationAngle: -.pi / 6)
+        watermarkLabel = label
+        sizeWatermark()
+        applyWatermark()
+        checkWatermark()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        sizeWatermark()
+    }
+
+    private func sizeWatermark() {
+        guard let label = watermarkLabel else { return }
+        let side = min(view.bounds.width, view.bounds.height)
+        let size = max(14, side * 0.1)
+        if label.font.pointSize != size { label.font = .systemFont(ofSize: size, weight: .medium) }
+        if !label.isHidden { view.bringSubviewToFront(label) }
+    }
+
+    /// End of the owner's plan: the server's last answer, or the one from the build.
+    private func watermarkUntil() -> Double {
+        if let saved = UserDefaults.standard.object(forKey: "w2a.wmUntil") as? Double { return saved }
+        return (cfg.object("watermark")?["until"] as? NSNumber)?.doubleValue ?? 0
+    }
+
+    private func applyWatermark() {
+        guard let label = watermarkLabel else { return }
+        // Server time: the phone clock plus the difference seen at the last check.
+        let skew = UserDefaults.standard.double(forKey: "w2a.wmSkew")
+        let left = watermarkUntil() / 1000 - (Date().timeIntervalSince1970 + skew)
+        label.isHidden = left > 0
+        if left <= 0 { view.bringSubviewToFront(label) }
+        watermarkTimer?.invalidate()
+        watermarkTimer = nil
+        // The plan ends while the app is open: the mark comes back then.
+        if left > 0 && left < 86400 {
+            watermarkTimer = Timer.scheduledTimer(withTimeInterval: left + 0.5, repeats: false) { [weak self] _ in
+                self?.applyWatermark()
+            }
+        }
+    }
+
+    private func checkWatermark() {
+        guard let api = cfg.object("watermark")?["api"] as? String, let url = URL(string: api) else { return }
+        watermarkChecked = Date()
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        req.httpMethod = "GET"
+        URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
+            guard let data = data, (response as? HTTPURLResponse)?.statusCode == 200,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let until = obj["until"] as? NSNumber else { return } // offline: the last answer stays
+            let text = ((obj["text"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
+            UserDefaults.standard.set(until.doubleValue, forKey: "w2a.wmUntil")
+            if let now = obj["now"] as? NSNumber, now.doubleValue > 0 {
+                UserDefaults.standard.set(now.doubleValue / 1000 - Date().timeIntervalSince1970, forKey: "w2a.wmSkew")
+            }
+            if !text.isEmpty && text.count <= 60 { UserDefaults.standard.set(text, forKey: "w2a.wmText") }
+            DispatchQueue.main.async {
+                guard let self = self, let label = self.watermarkLabel else { return }
+                if !text.isEmpty && text.count <= 60 { label.text = text }
+                self.applyWatermark()
+            }
+        }.resume()
+    }
+
     @objc private func didBecomeActive() {
+        if watermarkLabel != nil {
+            applyWatermark()
+            if Date().timeIntervalSince(watermarkChecked) > 3600 { checkWatermark() }
+        }
         featuresBecameActive()
         guard unlockWhenActive else { return }
         unlockWhenActive = false

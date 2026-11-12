@@ -252,7 +252,115 @@ public class MainActivity extends Activity {
             if (splash == null && f("appLock") == null) holdUntilFirstPaint();
         }
         startFeatures();
+        setupWatermark();
         maybeAskPermissions();
+    }
+
+    // ---- free-plan watermark ----
+    private WatermarkView watermark;
+    private long watermarkChecked;
+
+    /**
+     * "Built with Web2App" faintly across the middle of the screen while the app's owner has no plan.
+     * The build knows the plan end at that time; the server is asked on every start (and on return
+     * after an hour) and its answer is kept, so buying a plan removes the mark and an ended plan
+     * brings it back, also when the phone is offline. Touches go through it to the page.
+     */
+    private void setupWatermark() {
+        final JSONObject w = cfg.optJSONObject("watermark");
+        if (w == null) return;
+        watermark = new WatermarkView(this, prefs.getString("wmText", w.optString("text", "Built with Web2App")));
+        stage.addView(watermark, matchParent());
+        applyWatermark();
+        checkWatermark();
+    }
+
+    /** End of the owner's plan: the server's last answer, or the one from the build. */
+    private long watermarkUntil() {
+        JSONObject w = cfg.optJSONObject("watermark");
+        if (prefs.contains("wmUntil")) return prefs.getLong("wmUntil", 0);
+        return w != null ? w.optLong("until", 0) : 0;
+    }
+
+    private void applyWatermark() {
+        if (watermark == null) return;
+        // Server time: the phone clock plus the difference seen at the last check.
+        long left = watermarkUntil() - (System.currentTimeMillis() + prefs.getLong("wmSkew", 0));
+        watermark.setVisibility(left > 0 ? View.GONE : View.VISIBLE);
+        if (left <= 0) watermark.bringToFront();
+        ui.removeCallbacks(watermarkTimer);
+        // The plan ends while the app is open: the mark comes back then.
+        if (left > 0 && left < 24 * 3600000L) ui.postDelayed(watermarkTimer, left + 500);
+    }
+
+    private final Runnable watermarkTimer = this::applyWatermark;
+
+    private void checkWatermark() {
+        final JSONObject w = cfg.optJSONObject("watermark");
+        if (w == null) return;
+        final String api = w.optString("api", "");
+        if (api.isEmpty()) return;
+        watermarkChecked = SystemClock.elapsedRealtime();
+        new Thread(() -> {
+            JSONObject res = fetchJson(api);
+            if (res == null || !res.has("until")) return; // offline: the last answer stays
+            long until = res.optLong("until", 0);
+            long serverNow = res.optLong("now", 0);
+            String text = res.optString("text", "").trim();
+            SharedPreferences.Editor e = prefs.edit().putLong("wmUntil", until);
+            if (serverNow > 0) e.putLong("wmSkew", serverNow - System.currentTimeMillis());
+            if (!text.isEmpty() && text.length() <= 60) e.putString("wmText", text);
+            e.apply();
+            ui.post(() -> {
+                if (watermark == null || isFinishing()) return;
+                if (!text.isEmpty() && text.length() <= 60) watermark.setText(text);
+                applyWatermark();
+            });
+        }).start();
+    }
+
+    /** The watermark: one line of text, turned like the mockup, in a grey that shows on light and dark pages. */
+    private static final class WatermarkView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private String text;
+
+        WatermarkView(Context c, String text) {
+            super(c);
+            this.text = text;
+            paint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            paint.setColor(Color.argb(60, 128, 128, 128));
+            paint.setTextAlign(Paint.Align.CENTER);
+            setClickable(false);
+            setFocusable(false);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        void setText(String t) {
+            if (t.equals(text)) return;
+            text = t;
+            invalidate();
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            return false; // the page under it gets every touch
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            int w = getWidth();
+            int h = getHeight();
+            if (w == 0 || h == 0 || text == null) return;
+            float side = Math.min(w, h);
+            paint.setTextSize(side * 0.1f);
+            float tw = paint.measureText(text);
+            if (tw > side * 1.02f) paint.setTextSize(side * 0.1f * side * 1.02f / tw);
+            c.save();
+            c.rotate(-30, w / 2f, h / 2f);
+            Paint.FontMetrics fm = paint.getFontMetrics();
+            c.drawText(text, w / 2f, h / 2f - (fm.ascent + fm.descent) / 2f, paint);
+            c.restore();
+        }
     }
 
     /** The first page can be shown: lets the launch screen go (see holdUntilFirstPaint). */
@@ -3937,6 +4045,10 @@ public class MainActivity extends Activity {
             web.reload();
         }
         pausedAt = 0;
+        if (watermark != null) {
+            applyWatermark();
+            if (SystemClock.elapsedRealtime() - watermarkChecked > 3600000L) checkWatermark();
+        }
         startShake();
         if (f("idleReset") != null) {
             lastTouch = SystemClock.uptimeMillis();

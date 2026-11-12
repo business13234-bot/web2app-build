@@ -28,6 +28,11 @@ struct AppConfig {
         return ((raw["permissions"] as? [String]) ?? []).contains(permission)
     }
 
+    /// A settings group written by the build (e.g. "watermark"), or nil when it is not there.
+    func object(_ key: String) -> [String: Any]? {
+        return raw[key] as? [String: Any]
+    }
+
     /// Options of an extra feature, or nil when the feature is off.
     func feature(_ id: String) -> [String: Any]? {
         guard let all = raw["features"] as? [String: Any],

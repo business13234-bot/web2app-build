@@ -148,6 +148,12 @@ http.createServer((req, res) => {
     if (!args) return res.end('unknown');
     return execFile('xcrun', ['simctl', ...args], (err) => res.end(err ? 'error ' + err.message : 'done'));
   }
+  // Watermark check of the test apps: key FFFF... has no plan, any other key one for 30 days.
+  if (url.pathname.startsWith('/api/wm/')) {
+    const free = url.pathname.endsWith('F'.repeat(32));
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    return res.end(JSON.stringify({ show: free, until: free ? 0 : Date.now() + 30 * 86400000, text: 'Built with Web2App', now: Date.now() }));
+  }
   if (url.pathname === '/version.json') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     return res.end(JSON.stringify({ versionCode: state.versionCode, message: 'Version test message' }));

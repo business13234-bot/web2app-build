@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PERMISSIONS } from '../shared/catalog.mjs';
 import { pageScript } from '../shared/inject.mjs';
-import { readPayload, copyDir, write, writeImage, writeBinary, setEnv, splashMedia, siteFiles } from './lib.mjs';
+import { watermarkConfig, readPayload, copyDir, write, writeImage, writeBinary, setEnv, splashMedia, siteFiles } from './lib.mjs';
 
 const [payloadFile, outDir] = process.argv.slice(2);
 if (!payloadFile || !outDir) {
@@ -24,7 +24,7 @@ const feat = cfg.features || {};
 const on = (id) => Boolean(feat[id] && feat[id].enabled);
 
 // ---- runtime config read by AppConfig.swift ----
-const appConfig = { ...cfg, pageJs: pageScript(cfg) };
+const appConfig = { ...cfg, pageJs: pageScript(cfg), watermark: watermarkConfig(payload) };
 if (appConfig.features && appConfig.features.push) {
   // Push is Android only; its Firebase file is not needed here.
   appConfig.features = { ...appConfig.features, push: { ...appConfig.features.push, googleServices: undefined } };
